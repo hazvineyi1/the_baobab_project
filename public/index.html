@@ -59,6 +59,22 @@ body{
 #sky{position:absolute; inset:0; background:linear-gradient(var(--sky-far),var(--sky) 60%);}
 #ground{position:absolute; left:0; right:0; background:linear-gradient(var(--soil),var(--soil-deep));}
 #groundline{position:absolute; left:0; right:0; height:1px; background:var(--horizon); opacity:.6;}
+/* The tree the whole thing is named for, standing a long way behind the
+   family. Faint enough to read as texture rather than picture — it should be
+   noticed on the second look, not the first. */
+#backdrop{position:absolute; inset:0; overflow:visible; pointer-events:none;}
+.bg-trunk{fill:var(--bark); opacity:.065;}
+.bg-fold{fill:none; stroke:var(--bark); stroke-linecap:round; opacity:.045;}
+.bg-limb{fill:none; stroke:var(--bark); stroke-linecap:round; stroke-linejoin:round; opacity:.065;}
+.bg-root{fill:none; stroke:var(--root); stroke-linecap:round; stroke-linejoin:round; opacity:.08;}
+.bg-roots{opacity:.35;}                       /* raised as the view descends */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .bg-trunk,
+  :root:not([data-theme="light"]) .bg-limb{opacity:.10;}
+}
+:root[data-theme="dark"] .bg-trunk,
+:root[data-theme="dark"] .bg-limb{opacity:.10;}
+
 #canvas{position:absolute; inset:0; overflow:visible;}
 #pods{position:absolute; inset:0;}
 /* Buds live in screen space, not in the tree's, so they stay a constant,
@@ -374,6 +390,7 @@ body{
   <div id="sky"></div>
   <div id="ground"></div>
   <div id="groundline"></div>
+  <svg id="backdrop" aria-hidden="true"><g id="bgTree"></g></svg>
   <svg id="canvas"><g id="gtree" class="layer"></g></svg>
   <div id="pods" class="layer"></div>
   <div id="buds"></div>
@@ -1459,8 +1476,148 @@ function applyTransform(){
   $('ground').style.top = pos.y + 'px';
   $('ground').style.height = Math.max(0, innerHeight - pos.y) + 'px';
   $('groundline').style.top = pos.y + 'px';
+  placeBackdrop();
   placeBuds();
   if (pending && $('form')) placeForm($('form'));
+}
+
+/* ── the baobab behind everything ───────────────────────────────────────
+   A baobab is famously mostly roots — it looks like a tree planted upside
+   down, and it is the reason the layout puts ancestors below the horizon and
+   descendants above it.
+   
+   So the backdrop is not a static picture. It is planted on the horizon, and
+   its root system deepens as you travel down into the ancestors: each level of
+   root fades in only once the view has descended far enough to be among that
+   generation. Going further back through the family is going further down into
+   the soil, and the tree behind you grows the roots to match.
+   
+   Drawn once at startup, then only transformed — panning must not rebuild it. */
+
+/* A baobab's trunk is the whole point of it: enormous, squat, and fluted like
+   poured wax. The waviness is built into the outline rather than drawn on as
+   interior lines — stripes over a translucent shape read as a barcode, not bark. */
+const BG_TRUNK =
+  'M-272 6C-266-54-252-74-246-102C-240-132-256-150-249-178' +
+  'C-242-206-222-221-213-249C-206-271-192-283-172-290' +
+  'L172-290C192-283 206-271 213-249C222-221 242-206 249-178' +
+  'C256-150 240-132 246-102C252-74 266-54 272 6Z';
+
+// Two folds down the trunk. Bark over bark, so they read as shadow in the
+// flutes rather than as lines drawn on top.
+const BG_FOLDS = [
+  'M-140 0C-130-72-118-150-104-274',
+  'M6 0C10-90 4-186 6-284',
+  'M146 0C134-72 122-150 108-274'
+];
+
+/* One limb and everything that forks off it. The same routine draws the canopy
+   and the roots — a baobab's branches and roots really are hard to tell apart,
+   which is the whole joke of the tree.
+   
+   `pull` bends each generation of root back towards straight down, so the
+   system plunges instead of fanning out and stopping. */
+function bgGrow(out, rnd, x, y, ang, len, w, depth, spec){
+  if (depth > spec.maxDepth || w < 0.6 || len < 5) return;
+  const r = ang * Math.PI / 180;
+  const ex = x + Math.cos(r) * len, ey = y + Math.sin(r) * len;
+  // Bow each limb off the straight line, alternating side to side, so the
+  // silhouette comes out gnarled instead of looking like a diagram.
+  const perp = r + Math.PI / 2;
+  const bow = spec.curl * len * (0.10 + rnd() * 0.13) * (rnd() < 0.5 ? -1 : 1);
+  const mx = (x + ex) / 2 + Math.cos(perp) * bow;
+  const my = (y + ey) / 2 + Math.sin(perp) * bow;
+  out.push({ depth, w,
+    d: `M${x.toFixed(1)} ${y.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}` });
+
+  // How a thing branches is what makes it recognisable. A canopy multiplies —
+  // every limb forks into two or three. A root system does the opposite: it
+  // commits to a few taproots that carry on down, throwing off the occasional
+  // lateral. Branching roots like a canopy produces a curtain of parallel
+  // strands that reads as hair, not as a tree.
+  const kids = depth < spec.forkUntil ? (depth < 2 ? 3 : 2) : (rnd() < 0.3 ? 2 : 1);
+  for (let i = 0; i < kids; i++){
+    let a = ang + (kids > 1 ? (i - (kids - 1) / 2) * spec.spread : 0)
+                + (rnd() * 2 - 1) * spec.spread * (kids > 1 ? 0.4 : 0.7);
+    if (spec.pull) a += (90 - a) * spec.pull;
+    bgGrow(out, rnd, ex, ey, a, len * spec.decay, w * spec.taper, depth + 1,
+           { ...spec, spread: spec.spread * 0.9 });
+  }
+}
+
+let bgRootGroups = [], bgDeepest = 1;
+
+function buildBackdrop(){
+  const g = $('bgTree');
+  if (!g) return;
+  // Seeded, so the tree behind the family is the same tree on every visit and
+  // on every device — it is scenery, and scenery that reshuffles is a distraction.
+  let seed = 20260830 >>> 0;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+
+  const canopy = [], roots = [];
+  // Baobab limbs leave the trunk almost horizontally before turning up. Kept
+  // shallow on purpose — fine twigs at this opacity turn into visual noise
+  // behind the family, which is the opposite of what a backdrop is for.
+  [[-128, -156], [-66, -128], [0, -98], [66, -62], [128, -30]].forEach(([x, a]) => {
+    bgGrow(canopy, rnd, x, -286 + Math.abs(x) * 0.06, a, 168 + rnd() * 44, 40, 0,
+           { maxDepth: 3, forkUntil: 9, decay: 0.62, taper: 0.55, spread: 27, curl: 1 });
+  });
+  // Roots go far deeper than the canopy is tall, and keep most of their length
+  // each generation, so travelling down through the ancestors keeps finding
+  // more tree rather than running out of it.
+  [[-186, 122], [-104, 106], [-34, 94], [34, 84], [104, 70], [186, 56]].forEach(([x, a]) => {
+    bgGrow(roots, rnd, x, -4, a, 200 + rnd() * 44, 30, 0,
+           { maxDepth: 7, forkUntil: 2, decay: 0.88, taper: 0.78,
+             spread: 26, curl: 0.85, pull: 0.07 });
+  });
+
+  const out = [`<path class="bg-trunk" d="${BG_TRUNK}"/>`];
+  for (const d of BG_FOLDS) out.push(`<path class="bg-fold" stroke-width="14" d="${d}"/>`);
+  for (const l of canopy) out.push(`<path class="bg-limb" stroke-width="${l.w.toFixed(1)}" d="${l.d}"/>`);
+
+  // Roots are grouped by how deep they are, because each group fades in at a
+  // different point in the descent.
+  bgDeepest = roots.reduce((n, r) => Math.max(n, r.depth), 0);
+  for (let d = 0; d <= bgDeepest; d++){
+    const level = roots.filter(r => r.depth === d);
+    if (!level.length) continue;
+    out.push(`<g class="bg-roots" data-depth="${d}">` +
+      level.map(r => `<path class="bg-root" stroke-width="${r.w.toFixed(1)}" d="${r.d}"/>`).join('') +
+      `</g>`);
+  }
+  g.innerHTML = out.join('');
+  // Cached: this is read on every pan frame, and querying the DOM each time
+  // would make dragging the tree measurably worse on a phone.
+  bgRootGroups = Array.from(g.querySelectorAll('.bg-roots'))
+    .map(el => ({ el, depth: Number(el.dataset.depth) }));
+  placeBackdrop();
+}
+
+function placeBackdrop(){
+  const g = $('bgTree');
+  if (!g || typeof g.setAttribute !== 'function') return;
+
+  // Planted on the horizon — the ground line sits at pos.y, so the trunk foot
+  // tracks it exactly. Sideways it drifts at a fraction of the pan, and it
+  // grows far more slowly than the family does on zoom, which is what puts it
+  // at a distance rather than in the way.
+  const scale = Math.max(0.3, Math.min(1.5, (innerHeight * 0.8) / 900))
+              * (1 + (pos.k - 1) * 0.2);
+  g.setAttribute('transform',
+    `translate(${(innerWidth / 2 + pos.x * 0.12).toFixed(1)} ${pos.y.toFixed(1)}) ` +
+    `scale(${scale.toFixed(3)})`);
+
+  // How far the view has travelled below the horizon, which in this layout is
+  // how far back through the ancestors you have gone.
+  const descent = Math.max(0, Math.min(1,
+    (innerHeight * 0.45 - pos.y) / (innerHeight * 1.6)));
+  for (const r of bgRootGroups){
+    // Each level waits its turn, so the root system visibly lengthens the
+    // further down you travel rather than all arriving at once.
+    const shown = Math.max(0, Math.min(1, (descent - r.depth * 0.085) / 0.3));
+    r.el.style.opacity = (0.35 + 0.65 * shown).toFixed(3);
+  }
 }
 
 /* The review panel: every pair the tree thinks might be one person, with
@@ -2046,6 +2203,7 @@ function save(){
 }
 
 pos = { x:innerWidth/2, y:innerHeight*0.6, k:1 };
+buildBackdrop();
 load();
 </script>
 </body>
