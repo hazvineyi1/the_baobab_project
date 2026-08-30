@@ -468,6 +468,25 @@ body{
 #seed .box .btn{width:100%;}
 
 /* ── chrome ─────────────────────────────────────────────────────────── */
+/* Shown only when the shared tree could not be read. It has to be
+   unmissable: everything below it is a browser that must not write. */
+#stalled{
+  position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:80;
+  max-width:min(560px, calc(100vw - 28px));
+  padding:11px 15px; border-radius:12px;
+  background:var(--pod); border:1.5px solid var(--gold);
+  box-shadow:var(--shadow);
+  font-family:'Karla',sans-serif; font-size:12.5px; line-height:1.55;
+  color:var(--muted);
+}
+#stalled b{color:var(--ink); display:block; margin-bottom:2px;}
+#stalled button{
+  margin-left:6px; padding:4px 12px; border-radius:999px; cursor:pointer;
+  background:transparent; border:1.5px solid var(--pod-edge); color:var(--ink);
+  font-family:'Karla',sans-serif; font-size:12px; font-weight:600;
+}
+#stalled button:hover{border-color:var(--gold); color:var(--gold);}
+
 #bar{
   position:fixed; left:14px; bottom:14px; z-index:45;
   display:flex; align-items:center; gap:2px; padding:6px;
@@ -572,6 +591,14 @@ body{
 </div>
 
 <p id="hint" hidden>Tap anyone to see where the tree can grow.<br><b>Roots</b> run down into the soil, <b>branches</b> reach up.</p>
+<div id="stalled" hidden role="alert">
+  <b>The shared tree did not load.</b>
+  <span id="stalledWhy"></span>
+  Nothing you do here will be saved, and nothing already recorded has been
+  touched. Reload once the connection is back.
+  <button id="stalledGo">Try again</button>
+</div>
+
 <div id="live" class="sr" aria-live="polite"></div>
 
 <script>
@@ -3386,6 +3413,10 @@ $('dupes').onclick = openDuplicates;
 $('theme').onclick = cycleTheme;
 $('kin').onclick = openKinship;
 $('roots').onclick = openRoots;
+// A full reload rather than a re-fetch: the page has been sitting there
+// unable to save, so the tree it holds may be behind whatever else has
+// been recorded since. Starting clean is the honest recovery.
+$('stalledGo').onclick = () => location.reload();
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {
@@ -3419,19 +3450,63 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !pending && sel){ s
 /* ── storage ────────────────────────────────────────────────────────────
    On the deployed site this talks to the shared /api/shared endpoint so the
    whole family sees one tree. Anywhere else it quietly keeps the tree in
-   this browser instead. */
-let remote = false, timer = null;
+   this browser instead.
+
+   THREE STATES, NOT TWO. The middle one used to be missing, and its absence
+   was a way to erase the family's tree without anybody touching a delete
+   button:
+
+     'local'    no server here. This browser's own tree, in localStorage.
+     'shared'   the shared tree loaded, and writing it back is safe.
+     'stalled'  a server answered but its copy did NOT load. Never write.
+
+   The old code set remote=true BEFORE parsing the response, so a read that
+   failed halfway left the page believing it was connected while holding an
+   empty tree — and the next edit PUT that empty tree over everybody's work.
+   A whole-blob PUT replaces the file; there is no partial write to survive.
+
+   So the rule is now explicit: never write a tree we did not successfully
+   read. A page that cannot read says so and refuses to save. */
+let store = 'local', stalledWhy = '', timer = null;
 
 async function load(){
+  let r = null;
   try {
-    const r = await fetch('/api/shared/' + KEY, { headers:{ Accept:'application/json' } });
-    if (r.ok && (r.headers.get('content-type') || '').includes('json')){
-      remote = true;
+    r = await fetch('/api/shared/' + KEY, { headers:{ Accept:'application/json' } });
+  } catch (e) { r = null; }        // no response at all
+
+  if (r && r.ok && (r.headers.get('content-type') || '').includes('json')){
+    try {
       const d = await r.json();
+      // An absent value is a legitimate answer, not a failure: nobody has
+      // planted this tree yet. An unreadable one is a failure.
       if (d && d.value) state = JSON.parse(d.value);
+      store = 'shared';
+    } catch (e) {
+      store = 'stalled';
+      stalledWhy = 'The copy on the server could not be read.';
     }
-  } catch (e) { /* not deployed — fine */ }
-  if (!remote){
+  } else if (r && r.status === 404){
+    // Nothing serving the API on this origin — a static host, or the page
+    // opened straight from disk. This browser's own tree is the right one.
+    store = 'local';
+  } else if (r){
+    store = 'stalled';
+    stalledWhy = r.status === 410
+      ? 'This page is asking for a part of the server that has been retired.'
+      : `The server answered ${r.status}.`;
+  } else if (location.protocol === 'file:'){
+    store = 'local';
+  } else {
+    // The page itself came from this origin moments ago, so a request that
+    // gets no response at all means the connection dropped — not that there
+    // is no server. Assuming "local" here is how a shared tree gets forked
+    // into a private one nobody else ever sees.
+    store = 'stalled';
+    stalledWhy = 'The server could not be reached.';
+  }
+
+  if (store === 'local'){
     try { const raw = localStorage.getItem(KEY); if (raw) state = JSON.parse(raw); } catch (e) {}
   }
   if (!state || !state.people) state = { people:{}, unions:{}, rootId:null, seq:1 };
@@ -3441,21 +3516,46 @@ async function load(){
     const saved = localStorage.getItem(ME_KEY);
     if (saved && state.people[saved]) meId = saved;
   } catch (e) {}
+  showStalled();
   updateWho();
   render();
   if (people().length) fit();
 }
 
+/* A stalled page is still a usable page to read, but it must never look like
+   a page that is recording anything. */
+function showStalled(){
+  const el = $('stalled');
+  if (!el) return;
+  el.hidden = store !== 'stalled';
+  if (store === 'stalled'){
+    $('stalledWhy').textContent = stalledWhy;
+    say('The shared tree did not load. Nothing will be saved.');
+  }
+}
+
 function save(){
+  // The one line that matters: a browser that could not read the shared tree
+  // does not get to replace it.
+  if (store === 'stalled') return;
   clearTimeout(timer);
   timer = setTimeout(async () => {
     const value = JSON.stringify(state);
-    if (remote){
+    if (store === 'shared'){
       try {
-        await fetch('/api/shared/' + KEY, { method:'PUT',
+        const r = await fetch('/api/shared/' + KEY, { method:'PUT',
           headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ value }) });
+        if (!r.ok) throw new Error('server answered ' + r.status);
         return;
-      } catch (e) { /* fall through */ }
+      } catch (e) {
+        // A write that failed is not a write to retry into localStorage —
+        // that would fork the shared tree into a private copy. Stop, and say
+        // so, so the work can be re-entered rather than silently lost.
+        store = 'stalled';
+        stalledWhy = 'The last change could not be saved (' + e.message + ').';
+        showStalled();
+        return;
+      }
     }
     try { localStorage.setItem(KEY, value); } catch (e) {}
   }, 400);
