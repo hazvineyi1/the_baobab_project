@@ -5,7 +5,8 @@ const { Client } = require('pg');
 const path = require('path');
 
 const FILES = ['ops.test.js', 'concurrency.test.js', 'reads.test.js',
-               'duplicates.test.js', 'migration.test.js', 'scale.test.js'];
+               'duplicates.test.js', 'parity.test.js', 'migration.test.js',
+               'scale.test.js'];
 const fs = require('fs');
 
 (async () => {

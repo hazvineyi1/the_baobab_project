@@ -1,4 +1,4 @@
-# Storage architecture
+# The Baobab Project — storage architecture
 
 ## What changed, and why
 
@@ -105,10 +105,13 @@ generation the Shona terms still name directly.
 
 ## The Shona rules the data serves
 
-**Names.** `name_key` strips honorific titles (`sekuru`, `babamukuru`, `mai`,
-`va`, …) longest-first and lowercases, so "Garikai" and "Sekuru Garikai" match.
-The displayed name is never altered. Titles are stripped only as whole words —
-see the flagged assumption in `migrations/001_core.sql`.
+**Names.** `name_key` reproduces the frontend's `nameTokens()` exactly: lowercase,
+drop apostrophes and full stops, split on whitespace and hyphens, then remove
+every token that is an honorific title — wherever it sits, not just at the front.
+So "Sekuru Garikai", "Garikai Baba" and "Garikai" all reduce to `garikai`, while
+the bound form "VaMoyo" stays `vamoyo` because it is one token. The displayed
+name is never altered. `test/parity.test.js` checks the SQL and the JavaScript
+agree name for name.
 
 **Duplicates judge position, not name.** Shona children are named after their
 grandparents, so three living Garikais in one family is ordinary. The name is
@@ -116,6 +119,24 @@ capped at 0.34 and can only ever open the question; every strong signal is
 positional (shared spouse, shared child, same parent union), and being a
 generation apart pushes hard the other way — that is the grandfather-and-
 grandson case, and it is the common one.
+
+`db/duplicates.js` is a **port of `sameness()` in `public/index.html`**, not a
+reimplementation, and `test/parity.test.js` keeps it honest: it runs the whole
+real frontend script in a stubbed DOM and compares both implementations
+pair-by-pair over several trees, failing on any disagreement about which pairs
+are candidates, what they score, or which count as strong. If a weight changes
+on one side and not the other, that test goes red.
+
+Two behaviours worth knowing, both inherited from the frontend:
+
+- `mustBeDifferent()` refuses to compare two records the tree already says are
+  related — partners in one union, or one an ancestor of the other. So a
+  duplicate created as a *co-partner in the same union* is not a candidate;
+  real ones arrive as separate unions, which is how two relatives recording
+  the same marriage from different sides actually produce them.
+- A record whose name is nothing but a title ("Baba") reduces to no tokens, so
+  it never matches anything. It stays findable through search, which falls
+  back to the raw name when `name_key` is empty.
 
 **Seniority.** `birth_order` is stored because it is real, hand-settable
 information, and it is what the seniority terms resolve against when birth
@@ -134,12 +155,15 @@ runs warm. Reproduce with `npm test` (the `scale.test.js` suite asserts these).
 | `bootstrap` depth=4 | 5.4 ms | 200 ms |
 | `search` prefix | **7.5 ms** | 100 ms |
 | `search` fuzzy misspelling | 8.8 ms | 100 ms |
-| duplicate scan (whole tree) | **1.05 s** | "seconds, not minutes" |
+| duplicate scan (whole tree) | **1.48 s** | "seconds, not minutes" |
 | single-op write batch | 2.3 ms | — |
 | `changes?since=0` | 0.6 ms | — |
 
 A depth=3 bootstrap sends 45 people out of 5,000. The duplicate scan makes
 424,622 comparisons where a naive pass would make 12,497,500 — 29× fewer.
+Name tokenisation and similarity are memoised and the edit-distance table is
+skipped for pairs that cannot match on length; both are provably answer-
+preserving, and together they took the scan from 3.19 s to 1.48 s.
 
 ## Migrating off the blob
 
@@ -178,7 +202,7 @@ leave it on — the deployed frontend still needs it.
 ## Tests
 
 ```bash
-TEST_DATABASE_URL=postgres://... npm test           # 165 tests, six suites
+TEST_DATABASE_URL=postgres://... npm test           # 206 tests, seven suites
 node test/external.js                               # the out-of-repo harnesses
 ```
 

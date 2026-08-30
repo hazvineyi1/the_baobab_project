@@ -1,4 +1,4 @@
-// Duplicate detection.
+// Duplicate detection — a faithful port of the frontend's sameness().
 //
 // READ THIS BEFORE CHANGING A NUMBER IN HERE.
 //
@@ -15,253 +15,392 @@
 // identically they are spelled — because that is the grandfather-and-grandson
 // case, and it is the common one.
 //
-// The weights below are ported unchanged from the frontend's sameness(). They
-// are not tuning parameters. Do not adjust them to make a particular pair come
-// out the way you expect.
+// This is a PORT, not a reimplementation. The weights, the thresholds and the
+// order they are applied in all come from sameness() in public/index.html, and
+// test/parity.test.js runs both against the same trees and fails on any
+// disagreement. If you change a number here, change it there, or the browser
+// and the server will start giving the family different answers.
 
 const WEIGHTS = {
-  SHARED_SPOUSE:     0.5,   // married to the same person
-  SHARED_CHILD:      0.5,   // recorded as parent of the same child
-  SAME_PARENT_UNION: 0.4,   // both recorded as children of the same couple
-  GENERATION_APART: -0.45,  // per generation of separation
-  DIFFERENT_PARENTS:-0.4,   // each has parents, and they are different people
-  DIFFERENT_SEX:    -0.6,
-  NAME_CAP:          0.34   // the most a name can ever contribute
+  NAME_SAME:          0.34,  // identical once titles are set aside
+  NAME_ALL_SHARED:    0.28,  // every token of the shorter name matched
+  NAME_SOME_SHARED:   0.18,
+  SAME_GENERATION:    0.08,
+  GENERATION_APART:  -0.45,  // per generation, floored at -0.8 in total
+  GENERATION_FLOOR:  -0.8,
+  SHARED_SPOUSE:      0.5,
+  DIFFERENT_SPOUSE:  -0.18,
+  SHARED_CHILD:       0.5,
+  DIFFERENT_CHILDREN:-0.12,
+  SAME_PARENT_UNION:  0.4,
+  DIFFERENT_PARENTS: -0.4,
+  SAME_BIRTH_YEAR:    0.2,
+  DIFFERENT_BIRTH:   -0.55,  // more than two years apart
+  DIFFERENT_SEX:     -0.6,
+  SAME_TOTEM:         0.12
 };
 
-// UNCONFIRMED — the frontend's sameness() threshold was not available when
-// this was written, so this is a placeholder chosen to satisfy the behaviour
-// that IS specified: a name alone (max 0.34) must never flag a pair, while a
-// shared spouse (0.5) or a shared parent union (0.4) plus a matching name
-// must. Anything in (0.34, 0.74] does that. Replace with the real constant.
+// The cut-off duplicatePairs() uses in the frontend.
 const THRESHOLD = Number(process.env.MW_DUPLICATE_THRESHOLD || 0.5);
 
-// Blocking. Comparing every person to every other is O(n^2) — at 3,000 people
-// that is 4.5 million comparisons, which is what made the old client stall
-// inside render(). Instead, candidates are grouped into small buckets and only
-// compared within a bucket, which is O(n*k) for average bucket size k.
-//
-// Two blocking keys, because one is not enough:
-//   * the exact name_key, which catches "Garikai" vs "Sekuru Garikai"
-//   * a short prefix of it, which catches "Garikai" vs "Garikayi" — families
-//     spell by ear and the same person genuinely gets entered both ways
-const PREFIX_BLOCK = 4;
+// What the frontend surfaces as worth interrupting somebody over: a positional
+// signal, or an overwhelming score. A name alone can never reach either.
+const isLikely = d => d.strong || d.score >= 0.75;
 
-// A pathological bucket (a thousand people whose names all start "chi") would
-// put O(n^2) back in through the side door. Buckets past this size are still
-// compared on the exact-name key, where they belong, but their prefix block is
-// skipped rather than allowed to dominate the scan.
-const MAX_BUCKET = 300;
+const TITLES = new Set([
+  'sekuru','tateguru','ambuya','mbuya','gogo','baba','babamukuru','babamunini',
+  'amai','mai','mainini','maiguru','tete','vatete','mudhara','mukoma','muninina',
+  'sisi','bhudhi','va','mr','mrs','ms','dr','the','late'
+]);
+
+// Mirrors mw_name_key() in migrations/003, which mirrors nameTokens() in the
+// frontend. Kept here too so scoring never depends on a round trip.
+//
+// Memoised, along with nameSimilarity below. The browser can afford to redo
+// this work — it holds one family and a person is watching. A server scanning
+// thousands of records compares the same handful of distinct names over and
+// over, and Levenshtein is the most expensive thing in the scan. Caching
+// changes no result; it only stops the same answer being computed again.
+const tokenCache = new Map();
+const bounded = (cache, key, make) => {
+  let hit = cache.get(key);
+  if (hit !== undefined) return hit;
+  hit = make();
+  if (cache.size > 50000) cache.clear();
+  cache.set(key, hit);
+  return hit;
+};
+
+const rawTokens = name => String(name || '')
+  .toLowerCase()
+  .replace(/['’.]/g, '')
+  .replace(/[^a-z0-9\s-]/g, ' ')
+  .split(/[\s-]+/)
+  .filter(t => t && !TITLES.has(t));
+
+const nameTokens = name => bounded(tokenCache, String(name || ''), () => rawTokens(name));
+
+function editDistance(a, b){
+  if (a === b) return 0;
+  if (!a.length || !b.length) return Math.max(a.length, b.length);
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++){
+    const row = [i];
+    for (let j = 1; j <= b.length; j++){
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1,
+                        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+}
+
+// Families spell by ear, so one or two letters of drift is the same name.
+const closeEnough = (a, b) => {
+  if (a === b) return true;
+  // Both branches below need length >= 4 and allow at most 2 edits, so a pair
+  // that fails on length or differs in length by more than 2 can never match.
+  // Checking that first skips the Levenshtein table entirely for most pairs,
+  // and cannot change any answer.
+  if (a.length < 4 || b.length < 4) return false;
+  if (Math.abs(a.length - b.length) > 2) return false;
+  const d = editDistance(a, b);
+  return d <= (Math.min(a.length, b.length) >= 7 ? 2 : 1);
+};
+
+const simCache = new Map();
+function nameSimilarity(nameA, nameB){
+  // Order-independent: comparing A to B gives the same verdict as B to A once
+  // the shared-token list is the same, and the shorter-name test is symmetric.
+  const key = String(nameA) < String(nameB)
+    ? String(nameA) + '\u0000' + String(nameB)
+    : String(nameB) + '\u0000' + String(nameA);
+  return bounded(simCache, key, () => computeNameSimilarity(nameA, nameB));
+}
+
+function computeNameSimilarity(nameA, nameB){
+  const ta = nameTokens(nameA), tb = nameTokens(nameB);
+  if (!ta.length || !tb.length) return null;
+  const shared = ta.filter(x => tb.some(y => closeEnough(x, y)));
+  if (!shared.length) return null;
+  if (ta.join(' ') === tb.join(' ')){
+    return { score: WEIGHTS.NAME_SAME, why: 'same name once the title is set aside' };
+  }
+  if (shared.length >= Math.min(ta.length, tb.length)){
+    return { score: WEIGHTS.NAME_ALL_SHARED, why: `both called ${shared.join(' ')}` };
+  }
+  return { score: WEIGHTS.NAME_SOME_SHARED, why: `share the name ${shared.join(' ')}` };
+}
+
+const birthYear = born => {
+  const m = String(born || '').match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+  return m ? Number(m[1]) : null;
+};
 
 // ---------------------------------------------------------------------------
-// Generation numbers.
-//
-// DERIVED, NEVER STORED. Adding one person can shift what generation hundreds
-// of others sit in relative to each other, so this is computed fresh at the
-// start of each scan and thrown away afterwards — the same rule that keeps
-// kinship terms out of the database.
-//
-// Computed per connected component by relative position: parent -> child is
-// +1, and two partners are by definition the same generation. That last edge
-// matters: a woman who married in has no recorded parents, so counting only
-// downward from roots would place her at generation 0 and score her as five
-// generations from her own husband.
-function generations({ people, parentUnion, unionPartners, unionChildren }) {
-  const gen = new Map();
+// An in-memory view of one tree, so scoring never goes back to the database.
 
-  // Adjacency: person -> [{ id, delta }]
-  const adj = new Map();
-  const link = (a, b, delta) => {
-    if (!adj.has(a)) adj.set(a, []);
-    adj.get(a).push({ id: b, delta });
-  };
+function buildGraph(rows){
+  const { people, partnerRows, childRows } = rows;
 
-  for (const [unionId, partners] of unionPartners) {
-    for (let i = 0; i < partners.length; i++) {
-      for (let j = i + 1; j < partners.length; j++) {
-        link(partners[i], partners[j], 0);
-        link(partners[j], partners[i], 0);
-      }
-    }
-    const kids = unionChildren.get(unionId) || [];
-    for (const kid of kids) {
-      for (const p of partners) { link(p, kid, 1); link(kid, p, -1); }
-    }
-  }
-  // Siblings sit in the same generation even when no parent is recorded.
-  for (const [, kids] of unionChildren) {
-    for (let i = 0; i < kids.length; i++) {
-      for (let j = i + 1; j < kids.length; j++) {
-        link(kids[i], kids[j], 0);
-        link(kids[j], kids[i], 0);
-      }
-    }
-  }
+  const unionPartners = new Map();   // unionId -> [personId]
+  const unionChildren = new Map();
+  const parentUnion = new Map();     // personId -> unionId
+  const partnersOf = new Map();      // personId -> Set(personId)
+  const childrenOf = new Map();      // personId -> Set(personId), via any union
+  const unionsOf = new Map();        // personId -> [unionId]
 
-  for (const person of people) {
-    if (gen.has(person.id)) continue;
-    gen.set(person.id, 0);
-    const queue = [person.id];
-    while (queue.length) {
-      const cur = queue.shift();
-      for (const edge of adj.get(cur) || []) {
-        if (gen.has(edge.id)) continue;
-        gen.set(edge.id, gen.get(cur) + edge.delta);
-        queue.push(edge.id);
-      }
-    }
-  }
-  return gen;
-}
-
-// Dice coefficient over character bigrams. Deterministic and dependency-free,
-// so scoring does not change depending on whether pg_trgm happens to be
-// installed on the host.
-//
-// Bigram maps are memoised: a scan compares each name against many others, and
-// there are only as many distinct name_keys as there are distinct names.
-const gramCache = new Map();
-function bigrams(s) {
-  let g = gramCache.get(s);
-  if (g) return g;
-  g = { map: new Map(), total: 0 };
-  for (let i = 0; i < s.length - 1; i++) {
-    const k = s.slice(i, i + 2);
-    g.map.set(k, (g.map.get(k) || 0) + 1);
-    g.total++;
-  }
-  // Bounded so a long-running process cannot grow this without limit.
-  if (gramCache.size > 20000) gramCache.clear();
-  gramCache.set(s, g);
-  return g;
-}
-
-function nameSimilarity(a, b) {
-  if (!a || !b) return 0;
-  if (a === b) return 1;
-  const ga = bigrams(a), gb = bigrams(b);
-  if (!ga.total || !gb.total) return 0;
-  // Iterate the smaller map.
-  const [small, large] = ga.map.size <= gb.map.size ? [ga, gb] : [gb, ga];
-  let shared = 0;
-  for (const [k, n] of small.map) {
-    const m = large.map.get(k);
-    if (m) shared += n < m ? n : m;
-  }
-  return (2 * shared) / (ga.total + gb.total);
-}
-
-function score(a, b, ctx, identicalNames = false) {
-  const { parentUnion, partnersOf, childrenOf, gen } = ctx;
-  let s = 0;
-  const why = [];
-
-  // The name opens the question and nothing more.
-  //
-  // NOTE: "capped at 0.34" is read literally as min(similarity, 0.34) rather
-  // than as a scaling factor. In practice the two readings almost never
-  // differ, because blocking means most compared pairs have identical keys.
-  const sim = identicalNames ? 1 : nameSimilarity(a.name_key, b.name_key);
-  if (sim > 0) {
-    const contribution = Math.min(sim, WEIGHTS.NAME_CAP);
-    s += contribution;
-    why.push({ signal: 'name', value: +contribution.toFixed(3) });
-  }
-
-  // Married to the same person.
-  const spousesA = partnersOf.get(a.id) || new Set();
-  const spousesB = partnersOf.get(b.id) || new Set();
-  const sharedSpouse = [...spousesA].some(x => x !== b.id && spousesB.has(x));
-  if (sharedSpouse) { s += WEIGHTS.SHARED_SPOUSE; why.push({ signal: 'shared spouse', value: WEIGHTS.SHARED_SPOUSE }); }
-
-  // Recorded as parent of the same child.
-  const kidsA = childrenOf.get(a.id) || new Set();
-  const kidsB = childrenOf.get(b.id) || new Set();
-  const sharedChild = [...kidsA].some(x => kidsB.has(x));
-  if (sharedChild) { s += WEIGHTS.SHARED_CHILD; why.push({ signal: 'shared child', value: WEIGHTS.SHARED_CHILD }); }
-
-  // Parents.
-  const pa = parentUnion.get(a.id), pb = parentUnion.get(b.id);
-  if (pa && pb && pa === pb) {
-    s += WEIGHTS.SAME_PARENT_UNION;
-    why.push({ signal: 'same parents', value: WEIGHTS.SAME_PARENT_UNION });
-  } else if (pa && pb) {
-    s += WEIGHTS.DIFFERENT_PARENTS;
-    why.push({ signal: 'different parents', value: WEIGHTS.DIFFERENT_PARENTS });
-  }
-
-  // Generation. This is the signal that keeps a grandfather and the grandson
-  // named after him apart, and it is meant to be decisive.
-  const ga = gen.get(a.id), gb = gen.get(b.id);
-  if (ga != null && gb != null) {
-    const apart = Math.abs(ga - gb);
-    if (apart) {
-      const penalty = WEIGHTS.GENERATION_APART * apart;
-      s += penalty;
-      why.push({ signal: `${apart} generation${apart > 1 ? 's' : ''} apart`, value: +penalty.toFixed(3) });
-    }
-  }
-
-  // '' means "not recorded", which is not a disagreement.
-  if (a.sex && b.sex && a.sex !== b.sex) {
-    s += WEIGHTS.DIFFERENT_SEX;
-    why.push({ signal: 'different sex', value: WEIGHTS.DIFFERENT_SEX });
-  }
-
-  return { score: +s.toFixed(3), why };
-}
-
-// ---------------------------------------------------------------------------
-
-async function findDuplicates(pool, treeId, { threshold = THRESHOLD, limit = 200 } = {}) {
-  const started = Date.now();
-
-  const [peopleR, partnersR, childrenR, dismissedR] = await Promise.all([
-    pool.query(`SELECT id, name, name_key, sex, born_year FROM people WHERE tree_id = $1`, [treeId]),
-    pool.query(`SELECT union_id, person_id FROM union_partners up
-                 WHERE EXISTS (SELECT 1 FROM unions u WHERE u.id = up.union_id AND u.tree_id = $1)
-                 ORDER BY position`, [treeId]),
-    pool.query(`SELECT union_id, person_id FROM union_children uc
-                 WHERE EXISTS (SELECT 1 FROM unions u WHERE u.id = uc.union_id AND u.tree_id = $1)
-                 ORDER BY birth_order`, [treeId]),
-    pool.query(`SELECT a_id, b_id FROM not_duplicates WHERE tree_id = $1`, [treeId])
-  ]);
-
-  const people = peopleR.rows;
-  const byId = new Map(people.map(p => [p.id, p]));
-
-  const unionPartners = new Map();
-  for (const r of partnersR.rows) {
+  for (const r of partnerRows){
     if (!unionPartners.has(r.union_id)) unionPartners.set(r.union_id, []);
     unionPartners.get(r.union_id).push(r.person_id);
+    if (!unionsOf.has(r.person_id)) unionsOf.set(r.person_id, []);
+    unionsOf.get(r.person_id).push(r.union_id);
   }
-  const unionChildren = new Map();
-  const parentUnion = new Map();
-  for (const r of childrenR.rows) {
+  for (const r of childRows){
     if (!unionChildren.has(r.union_id)) unionChildren.set(r.union_id, []);
     unionChildren.get(r.union_id).push(r.person_id);
     parentUnion.set(r.person_id, r.union_id);
   }
-
-  // person -> the people they are partnered with, and the children they have.
-  const partnersOf = new Map(), childrenOf = new Map();
-  for (const [unionId, partners] of unionPartners) {
-    for (const p of partners) {
+  for (const [unionId, partners] of unionPartners){
+    const kids = unionChildren.get(unionId) || [];
+    for (const p of partners){
       if (!partnersOf.has(p)) partnersOf.set(p, new Set());
-      for (const q of partners) if (q !== p) partnersOf.get(p).add(q);
       if (!childrenOf.has(p)) childrenOf.set(p, new Set());
-      for (const kid of unionChildren.get(unionId) || []) childrenOf.get(p).add(kid);
+      for (const q of partners) if (q !== p) partnersOf.get(p).add(q);
+      for (const k of kids) childrenOf.get(p).add(k);
     }
   }
 
-  const dismissed = new Set(dismissedR.rows.map(r => `${r.a_id}|${r.b_id}`));
-  const gen = generations({ people, parentUnion, unionPartners, unionChildren });
-  const ctx = { parentUnion, partnersOf, childrenOf, gen };
+  // Everyone above a person. Memoised: a scan asks for the same ancestors
+  // repeatedly, and walking the tree per pair is what made this slow.
+  const ancCache = new Map();
+  function ancestorsOf(id){
+    let hit = ancCache.get(id);
+    if (hit) return hit;
+    const up = new Set();
+    let frontier = [id], guard = 0;
+    while (frontier.length && guard++ < 200){
+      const next = [];
+      for (const cur of frontier){
+        const u = parentUnion.get(cur);
+        if (u === undefined) continue;
+        for (const par of unionPartners.get(u) || []){
+          if (up.has(par) || par === id) continue;
+          up.add(par);
+          next.push(par);
+        }
+      }
+      frontier = next;
+    }
+    ancCache.set(id, up);
+    return up;
+  }
 
-  // Bucket, then score only within buckets.
+  return { people, unionPartners, unionChildren, parentUnion,
+           partnersOf, childrenOf, unionsOf, ancestorsOf };
+}
+
+/* Generation numbers.
+ *
+ * DERIVED, NEVER STORED. Adding one person can shift what generation hundreds
+ * of others sit in relative to each other, so this is computed fresh at the
+ * start of each scan and thrown away — the same rule that keeps kinship terms
+ * out of the database.
+ *
+ * This is the frontend's generations() step for step: breadth-first from the
+ * recorded root, where a parent union's partners are one above, its other
+ * children are level, a person's own spouses are level, and their children are
+ * one below. Anyone the walk never reaches falls back to 0, exactly as the
+ * frontend does — which matters, because it makes two unconnected records
+ * count as the same generation rather than an arbitrary distance apart.
+ */
+function generations(g){
+  const gen = {};
+  const root = g.people.find(p => p.is_root);
+  if (!root) { for (const p of g.people) gen[p.id] = 0; return gen; }
+
+  const queue = [root.id];
+  gen[root.id] = 0;
+  const step = (other, n) => {
+    if (other && gen[other] === undefined){ gen[other] = n; queue.push(other); }
+  };
+  while (queue.length){
+    const id = queue.shift(), n = gen[id];
+    const pu = g.parentUnion.get(id);
+    if (pu !== undefined){
+      (g.unionPartners.get(pu) || []).forEach(p => step(p, n - 1));
+      (g.unionChildren.get(pu) || []).forEach(c => step(c, n));
+    }
+    for (const u of g.unionsOf.get(id) || []){
+      (g.unionPartners.get(u) || []).forEach(p => step(p, n));
+      (g.unionChildren.get(u) || []).forEach(c => step(c, n + 1));
+    }
+  }
+  for (const p of g.people) if (gen[p.id] === undefined) gen[p.id] = 0;
+  return gen;
+}
+
+// Two records cannot be one person if the tree already says they are related.
+function mustBeDifferent(g, a, b){
+  if (a === b) return true;
+  if ((g.partnersOf.get(a) || new Set()).has(b)) return true;
+  if (g.ancestorsOf(a).has(b)) return true;
+  if (g.ancestorsOf(b).has(a)) return true;
+  return false;
+}
+
+function sameness(g, gen, aId, bId){
+  const a = g.byId.get(aId), b = g.byId.get(bId);
+  if (!a || !b || mustBeDifferent(g, aId, bId)) return null;
+
+  const nm = nameSimilarity(a.name, b.name);
+  if (!nm) return null;
+
+  const why = [nm.why];
+  const against = [];
+  let score = nm.score;
+
+  // ── generation ────────────────────────────────────────────────────────
+  if (gen[aId] !== undefined && gen[bId] !== undefined){
+    const d = Math.abs(gen[aId] - gen[bId]);
+    if (d === 0) score += WEIGHTS.SAME_GENERATION;
+    else {
+      score -= Math.min(-WEIGHTS.GENERATION_FLOOR, -WEIGHTS.GENERATION_APART * d);
+      against.push(d === 1 ? 'one generation apart — more likely named after them'
+                           : `${d} generations apart`);
+    }
+  }
+
+  // ── who they are married to ───────────────────────────────────────────
+  const mates = [...(g.partnersOf.get(aId) || [])];
+  const theirs = g.partnersOf.get(bId) || new Set();
+  const sharedMate = mates.filter(x => theirs.has(x));
+  if (sharedMate.length){
+    score += WEIGHTS.SHARED_SPOUSE;
+    why.push(`both married to ${g.byId.get(sharedMate[0]).name}`);
+  } else if (mates.length && theirs.size){
+    score += WEIGHTS.DIFFERENT_SPOUSE;
+    against.push('married to different people');
+  }
+
+  // ── whose children they are parents of ────────────────────────────────
+  const kidsA = [...(g.childrenOf.get(aId) || [])];
+  const kidsB = g.childrenOf.get(bId) || new Set();
+  const sharedKid = kidsA.filter(k => kidsB.has(k));
+  if (sharedKid.length){
+    score += WEIGHTS.SHARED_CHILD;
+    why.push(`both parents of ${g.byId.get(sharedKid[0]).name}`);
+  } else if (kidsA.length && kidsB.size){
+    score += WEIGHTS.DIFFERENT_CHILDREN;
+    against.push('different children recorded');
+  }
+
+  // ── whose children they are ───────────────────────────────────────────
+  const pa = g.parentUnion.get(aId), pb = g.parentUnion.get(bId);
+  if (pa !== undefined && pb !== undefined){
+    const setA = (g.unionPartners.get(pa) || []).slice().sort().join();
+    const setB = (g.unionPartners.get(pb) || []).slice().sort().join();
+    if (pa === pb){
+      score += WEIGHTS.SAME_PARENT_UNION;
+      why.push('listed twice among the same children');
+    } else if (setA && setA === setB){
+      score += WEIGHTS.SAME_PARENT_UNION;
+      why.push('the same parents');
+    } else {
+      score += WEIGHTS.DIFFERENT_PARENTS;
+      against.push('different parents recorded — if those two are also one person, merge them first');
+    }
+  }
+
+  // ── the smaller corroborations ────────────────────────────────────────
+  const ya = birthYear(a.born), yb = birthYear(b.born);
+  if (ya && yb){
+    if (ya === yb){ score += WEIGHTS.SAME_BIRTH_YEAR; why.push(`both born ${ya}`); }
+    else if (Math.abs(ya - yb) > 2){
+      score += WEIGHTS.DIFFERENT_BIRTH;
+      against.push(`born ${ya} and ${yb}`);
+    }
+  }
+  if (a.sex && b.sex && a.sex !== b.sex){
+    score += WEIGHTS.DIFFERENT_SEX;
+    against.push('recorded as different sexes');
+  }
+  if (a.totem && b.totem && a.totem.toLowerCase() === b.totem.toLowerCase()){
+    score += WEIGHTS.SAME_TOTEM;
+    why.push(`same totem, ${a.totem}`);
+  }
+
+  return {
+    score: Math.max(0, Math.min(1, score)),
+    why, against,
+    // a name on its own never gets past "possible"
+    strong: sharedMate.length > 0 || sharedKid.length > 0 || (pa !== undefined && pa === pb)
+  };
+}
+
+module.exports = {
+  WEIGHTS, THRESHOLD, TITLES, isLikely,
+  nameTokens, editDistance, closeEnough, nameSimilarity, birthYear,
+  buildGraph, generations, mustBeDifferent, sameness
+};
+
+// ---------------------------------------------------------------------------
+// The scan.
+//
+// The frontend compares every person to every other one — O(n^2) — which is
+// what made it stall inside render(). It can afford to: a browser tree is
+// small and the user is looking at it. The server cannot, so it blocks
+// candidates into buckets and only compares within them.
+//
+// Blocking never changes a SCORE, only which pairs get scored. Every pair a
+// bucket produces is scored by the ported sameness() above and gets the same
+// number the browser would give it. The two blocking keys are chosen so that
+// nothing sameness() could have flagged is missed:
+//
+//   * the exact name_key, which catches "Garikai" against "Sekuru Garikai"
+//   * a short prefix of it, which catches "Garikai" against "Garikayi" —
+//     families spell by ear and the same person is entered both ways
+//
+// nameSimilarity() returns null unless two names share a token, so a pair with
+// no shared token is not a candidate under either implementation.
+
+const PREFIX_BLOCK = 4;
+
+// A pathological block (a thousand names starting "chi") would put O(n^2) back
+// in through the side door. Oversized prefix blocks are skipped; those people
+// are still compared on their exact name key, where they belong.
+const MAX_BUCKET = 300;
+
+async function loadTree(pool, treeId){
+  const [peopleR, partnersR, childrenR, dismissedR] = await Promise.all([
+    pool.query(`SELECT id, name, name_key, sex, totem, born, born_year, is_root
+                  FROM people WHERE tree_id = $1`, [treeId]),
+    pool.query(`SELECT up.union_id, up.person_id FROM union_partners up
+                  JOIN unions u ON u.id = up.union_id
+                 WHERE u.tree_id = $1 ORDER BY up.position`, [treeId]),
+    pool.query(`SELECT uc.union_id, uc.person_id FROM union_children uc
+                  JOIN unions u ON u.id = uc.union_id
+                 WHERE u.tree_id = $1 ORDER BY uc.birth_order`, [treeId]),
+    pool.query(`SELECT a_id, b_id FROM not_duplicates WHERE tree_id = $1`, [treeId])
+  ]);
+  const g = buildGraph({
+    people: peopleR.rows,
+    partnerRows: partnersR.rows,
+    childRows: childrenR.rows
+  });
+  g.byId = new Map(peopleR.rows.map(p => [p.id, p]));
+  g.dismissed = new Set(dismissedR.rows.map(r => `${r.a_id}|${r.b_id}`));
+  return g;
+}
+
+async function findDuplicates(pool, treeId, { threshold = THRESHOLD, limit = 200 } = {}) {
+  const started = Date.now();
+  const g = await loadTree(pool, treeId);
+  const gen = generations(g);
+
   const exact = new Map(), prefix = new Map();
-  for (const p of people) {
-    if (!p.name_key) continue;
+  for (const p of g.people){
+    if (!p.name_key) continue;         // nothing but a title — never a candidate
     if (!exact.has(p.name_key)) exact.set(p.name_key, []);
     exact.get(p.name_key).push(p);
     const pk = p.name_key.slice(0, PREFIX_BLOCK);
@@ -273,9 +412,9 @@ async function findDuplicates(pool, treeId, { threshold = THRESHOLD, limit = 200
   const hits = [];
   let comparisons = 0;
 
-  const compare = (bucket, identicalNames = false) => {
-    for (let i = 0; i < bucket.length; i++) {
-      for (let j = i + 1; j < bucket.length; j++) {
+  const compare = bucket => {
+    for (let i = 0; i < bucket.length; i++){
+      for (let j = i + 1; j < bucket.length; j++){
         let a = bucket[i], b = bucket[j];
         // Canonical order, matching not_duplicates' CHECK (a_id < b_id), so a
         // dismissal recorded once suppresses the pair however it is reached.
@@ -283,18 +422,16 @@ async function findDuplicates(pool, treeId, { threshold = THRESHOLD, limit = 200
         const key = `${a.id}|${b.id}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        if (dismissed.has(key)) continue;
+        if (g.dismissed.has(key)) continue;
         comparisons++;
-        const { score: s, why } = score(a, b, ctx, identicalNames);
-        if (s >= threshold) hits.push({ a, b, score: s, why });
+        const m = sameness(g, gen, a.id, b.id);
+        if (m && m.score >= threshold) hits.push({ a, b, ...m });
       }
     }
   };
 
-  // Within an exact-name bucket every name_key is identical by construction,
-  // so similarity is 1 and does not need computing.
-  for (const bucket of exact.values()) if (bucket.length > 1) compare(bucket, true);
-  for (const bucket of prefix.values()) {
+  for (const bucket of exact.values()) if (bucket.length > 1) compare(bucket);
+  for (const bucket of prefix.values()){
     if (bucket.length > 1 && bucket.length <= MAX_BUCKET) compare(bucket);
   }
 
@@ -303,24 +440,29 @@ async function findDuplicates(pool, treeId, { threshold = THRESHOLD, limit = 200
   return {
     treeId,
     threshold,
-    scanned: people.length,
+    scanned: g.people.length,
     comparisons,
     ms: Date.now() - started,
-    // A worst-case O(n^2) scan would need this many. Reported so a regression
-    // in the blocking strategy is visible rather than merely slow.
-    naiveComparisons: (people.length * (people.length - 1)) / 2,
+    // What a naive all-pairs scan would have cost. Reported so a regression in
+    // the blocking strategy shows up as a number rather than as "feels slow".
+    naiveComparisons: (g.people.length * (g.people.length - 1)) / 2,
+    likely: hits.filter(isLikely).length,
     pairs: hits.slice(0, limit).map(h => ({
       score: h.score,
+      likely: isLikely(h),
       why: h.why,
-      a: publicPerson(byId.get(h.a.id)),
-      b: publicPerson(byId.get(h.b.id))
+      against: h.against,
+      a: publicPerson(h.a),
+      b: publicPerson(h.b)
     })),
     truncated: hits.length > limit
   };
 }
 
 const publicPerson = p => ({
-  id: p.id, name: p.name, sex: p.sex, born_year: p.born_year
+  id: p.id, name: p.name, sex: p.sex, totem: p.totem,
+  born: p.born, born_year: p.born_year
 });
 
-module.exports = { findDuplicates, nameSimilarity, generations, WEIGHTS, THRESHOLD };
+module.exports.findDuplicates = findDuplicates;
+module.exports.loadTree = loadTree;

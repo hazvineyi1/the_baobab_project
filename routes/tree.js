@@ -56,7 +56,7 @@ module.exports = function treeRoutes(pool) {
 
   r.post('/trees', async (req, res) => {
     try {
-      const name = String(req.body?.name || 'Muti weMhuri').slice(0, 200);
+      const name = String(req.body?.name || 'The Baobab Project').slice(0, 200);
       const { rows } = await pool.query(
         'INSERT INTO trees (name) VALUES ($1) RETURNING id, name, created_at', [name]);
       res.status(201).json(rows[0]);

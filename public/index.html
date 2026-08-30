@@ -1,895 +1,2052 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Muti weMhuri — Shona Family Tree</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>The Baobab Project</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Karla:wght@400;500;600;700&display=swap" rel="stylesheet">
+
 <style>
-  :root{
-    --bg-deep:#141F17;
-    --bg-panel:#1C2A1F;
-    --card:#233421;
-    --card-border:#3A4E36;
-    --gold:#C7A24A;
-    --gold-soft:#E4CD8C;
-    --clay:#A15F33;
-    --sage:#7E9468;
-    --sage-line:#5A6E4E;
-    --parchment:#F1EAD6;
-    --muted:#9FAE93;
-    --danger:#B5544A;
-    --radius-leaf: 22px 6px 22px 6px;
+/* ═══ Dry season: bone sky above, ochre soil below, silver baobab bark ═══ */
+:root{
+  --sky:#F3EDE1; --sky-far:#E7DECC;
+  --soil:#E3D3B8; --soil-deep:#D5BF9C; --horizon:#BFA47A;
+  --bark:#8A7860; --bark-thin:#A08E76; --root:#B09A76;
+  --pod:#FFFDF7; --pod-edge:#CBBB9E; --pod-hi:#F6F0E2;
+  --ink:#2A2318; --muted:#79705F;
+  --gold:#9C6119; --gold-soft:#C4832F; --leaf:#4C6836;
+  --shadow:0 2px 10px rgba(42,35,24,.13);
+  --lift:0 8px 26px rgba(42,35,24,.22);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --sky:#0F1310; --sky-far:#171C15;
+    --soil:#191510; --soil-deep:#0C0A07; --horizon:#4A3D2A;
+    --bark:#8A7A62; --bark-thin:#6B5E4B; --root:#6E5E47;
+    --pod:#1C221A; --pod-edge:#3C4535; --pod-hi:#141A13;
+    --ink:#EFE7D6; --muted:#948D7C;
+    --gold:#D9A441; --gold-soft:#EFC877; --leaf:#92AB78;
+    --shadow:0 2px 10px rgba(0,0,0,.45);
+    --lift:0 8px 26px rgba(0,0,0,.6);
   }
-  *{box-sizing:border-box;}
-  html,body{margin:0;padding:0;background:var(--bg-deep);color:var(--parchment);font-family:'Work Sans',sans-serif;}
-  body{padding:28px 20px 80px;min-height:100vh;}
-  .wrap{max-width:1200px;margin:0 auto;}
+}
+:root[data-theme="dark"]{
+  --sky:#0F1310; --sky-far:#171C15;
+  --soil:#191510; --soil-deep:#0C0A07; --horizon:#4A3D2A;
+  --bark:#8A7A62; --bark-thin:#6B5E4B; --root:#6E5E47;
+  --pod:#1C221A; --pod-edge:#3C4535; --pod-hi:#141A13;
+  --ink:#EFE7D6; --muted:#948D7C;
+  --gold:#D9A441; --gold-soft:#EFC877; --leaf:#92AB78;
+  --shadow:0 2px 10px rgba(0,0,0,.45);
+  --lift:0 8px 26px rgba(0,0,0,.6);
+}
 
-  header.top{margin-bottom:18px;}
-  h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(28px,4vw,42px);margin:0 0 4px;color:var(--parchment);letter-spacing:0.2px;}
-  h1 .accent{color:var(--gold-soft);font-style:italic;font-weight:500;}
-  .subtitle{color:var(--muted);font-size:14.5px;max-width:640px;line-height:1.5;margin:0 0 16px;}
+*{box-sizing:border-box;}
+[hidden]{display:none !important;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--sky); color:var(--ink);
+  font-family:'Karla','Helvetica Neue',Arial,sans-serif;
+  overflow:hidden; -webkit-tap-highlight-color:transparent;
+}
 
-  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px;}
-  .toolbar select, .toolbar button, .btn{
-    font-family:'Work Sans',sans-serif;font-size:13.5px;font-weight:500;
-    background:var(--card);color:var(--parchment);border:1px solid var(--card-border);
-    padding:8px 13px;border-radius:8px;cursor:pointer;transition:border-color .15s, background .15s;
-  }
-  .toolbar select{padding-right:8px;}
-  .toolbar button:hover,.btn:hover{border-color:var(--gold);}
-  .btn-primary{background:var(--gold);color:#20200F;border-color:var(--gold);font-weight:600;}
-  .btn-primary:hover{background:var(--gold-soft);}
-  .btn-ghost{background:transparent;}
-  .btn-danger{border-color:var(--danger);color:var(--danger);background:transparent;}
-  .btn-danger:hover{background:rgba(181,84,74,0.12);}
+/* ── stage ──────────────────────────────────────────────────────────── */
+#stage{position:fixed; inset:0; cursor:grab; touch-action:none;}
+#stage.dragging{cursor:grabbing;}
+#sky{position:absolute; inset:0; background:linear-gradient(var(--sky-far),var(--sky) 60%);}
+#ground{position:absolute; left:0; right:0; background:linear-gradient(var(--soil),var(--soil-deep));}
+#groundline{position:absolute; left:0; right:0; height:1px; background:var(--horizon); opacity:.6;}
+#canvas{position:absolute; inset:0; overflow:visible;}
+#pods{position:absolute; inset:0;}
+/* Buds live in screen space, not in the tree's, so they stay a constant,
+   finger-sized distance from a person however far you have zoomed out. */
+#buds{position:absolute; inset:0; pointer-events:none;}
+#buds .bud, #buds .term{pointer-events:auto;}
+.layer{position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform;}
 
-  .legend{
-    background:var(--bg-panel);border:1px solid var(--card-border);border-radius:14px;
-    padding:18px 22px;margin:14px 0 26px;line-height:1.65;font-size:14px;color:var(--parchment);
-    display:none;
-  }
-  .legend.open{display:block;}
-  .legend h2{font-family:'Fraunces',serif;font-weight:600;font-size:19px;color:var(--gold-soft);margin:0 0 10px;}
-  .legend h3{font-size:14px;color:var(--gold-soft);margin:16px 0 4px;font-family:'Work Sans',sans-serif;font-weight:600;}
-  .legend p{margin:0 0 8px;color:#DCE2CE;}
-  .legend .termlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 18px;margin:8px 0;}
-  .legend .termlist div{font-size:13px;color:var(--muted);}
-  .legend .termlist b{color:var(--parchment);font-weight:600;}
-  .legend .note{font-size:12.5px;color:var(--muted);border-top:1px solid var(--card-border);margin-top:14px;padding-top:12px;}
+/* ── branches ───────────────────────────────────────────────────────── */
+.branch{fill:none; stroke-linecap:round; stroke:var(--bark);}
+.branch.root{stroke:var(--root);}
+.branch.unknown{stroke:var(--muted); stroke-width:2; stroke-dasharray:4 6; opacity:.6;}
+.bond{stroke:var(--bark-thin); stroke-width:3; stroke-linecap:round; fill:none;}
+.bond.reach{stroke-dasharray:none; opacity:.7;}   /* a partner further along the row */
+.grow{stroke-dasharray:1400; stroke-dashoffset:1400; animation:draw .55s ease-out forwards;}
+@keyframes draw{to{stroke-dashoffset:0;}}
 
-  .forest{position:relative;display:flex;flex-direction:column;align-items:center;gap:70px;padding:10px 20px 60px;overflow-x:auto;}
+/* ── person pods ────────────────────────────────────────────────────── */
+.pod{
+  position:absolute; transform:translate(-50%,-50%);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  width:132px; min-height:46px; padding:8px 12px;
+  background:var(--pod); border:1.5px solid var(--pod-edge);
+  border-radius:26px 8px 26px 8px;
+  box-shadow:var(--shadow); cursor:pointer; user-select:none;
+  transition:box-shadow .18s, border-color .18s;
+}
+.pod:hover{border-color:var(--gold-soft); box-shadow:var(--lift);}
+.pod:focus-visible{outline:2.5px solid var(--gold); outline-offset:3px;}
+.pod.sel{border-color:var(--gold); border-width:2px; box-shadow:var(--lift);}
+.pod.sprout{animation:pop .45s cubic-bezier(.2,1.5,.4,1) backwards;}
+@keyframes pop{from{transform:translate(-50%,-50%) scale(.15); opacity:0;}}
+.pod .nm{
+  font-family:'Fraunces',Georgia,'Times New Roman',serif; font-weight:500; font-size:15px;
+  line-height:1.22; text-align:center; color:var(--ink); word-break:break-word;
+}
+.pod .tot{
+  font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--muted); margin-top:4px;
+}
+.pod .mk{position:absolute; left:9px; top:5px; font-size:10px; color:var(--gold-soft);}
+.pod .rm{
+  position:absolute; right:-9px; top:-9px; width:22px; height:22px; border-radius:50%;
+  display:none; align-items:center; justify-content:center;
+  background:var(--pod); border:1.5px solid var(--pod-edge); color:var(--muted);
+  font-size:12px; line-height:1; cursor:pointer;
+}
+.pod.sel .rm{display:flex;}
+.pod .rm:hover{border-color:var(--gold); color:var(--gold);}
 
-  /* ---- top-down tree (default): great-grandparents anchor the top, branches fan out below ---- */
-  .node{display:flex;flex-direction:column;align-items:center;}
-  .children-row{
-    display:flex;flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:flex-start;
-    gap:28px 36px;margin-top:34px;
-  }
-  .child-slot{display:flex;}
-  #connectorSvg line{stroke:var(--sage-line);stroke-width:2px;}
+/* move somebody earlier or later among their brothers and sisters */
+.pod .ord{
+  position:absolute; top:50%; margin-top:-13px; width:26px; height:26px;
+  border-radius:50%; display:none; align-items:center; justify-content:center;
+  background:var(--pod); border:1.5px solid var(--pod-edge); color:var(--muted);
+  font-size:14px; line-height:1; cursor:pointer;
+}
+.pod .ord.older{left:-14px;} .pod .ord.younger{right:-14px;}
+.pod.sel .ord{display:flex;}
+.pod .ord:hover{border-color:var(--gold); color:var(--gold);}
 
-  /* ---- left-to-right orientation: root at the left edge, generations flow right ---- */
-  .forest.ltr{align-items:flex-start;}
-  .forest.ltr .node{flex-direction:row;align-items:center;}
-  .forest.ltr .children-row{
-    flex-direction:column;flex-wrap:nowrap;justify-content:center;align-items:flex-start;
-    gap:22px;margin-top:0;margin-left:40px;
-  }
+/* eldest → youngest runs left to right; the rank sits under the name */
+.pod .rank{
+  font-size:9px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--gold-soft); margin-top:3px; font-weight:700;
+}
 
-  .fold-btn{margin-top:2px;}
-  .unit{display:flex;flex-direction:column;align-items:center;gap:8px;position:relative;z-index:1;}
-  .couple-row{display:flex;align-items:center;gap:6px;}
-  .knot{color:var(--gold);font-size:15px;opacity:.8;}
+/* the furthest ancestor anybody can trace — the taproot of the line */
+.pod.taproot{
+  background:var(--soil); border-color:var(--root); border-width:2.5px;
+  border-radius:8px 26px 8px 26px;
+}
+.pod.taproot .nm{font-weight:600;}
+.pod.taproot .badge{
+  position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+  padding:2px 9px; border-radius:999px; white-space:nowrap;
+  background:var(--root); color:var(--sky);
+  font-size:8.5px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+}
+.pod .dates{
+  font-size:9.5px; color:var(--muted); margin-top:3px;
+  font-variant-numeric:tabular-nums;
+}
+/* whoever is holding the phone */
+.pod.you{border-color:var(--leaf); box-shadow:0 0 0 3px color-mix(in srgb, var(--leaf) 22%, transparent);}
+.pod.you .badge{
+  position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+  padding:2px 9px; border-radius:999px; background:var(--leaf); color:var(--sky);
+  font-size:8.5px; font-weight:700; letter-spacing:.16em; text-transform:uppercase;
+}
 
-  .card{
-    background:var(--card);border:1px solid var(--card-border);border-radius:var(--radius-leaf);
-    padding:10px 14px 9px;min-width:150px;text-align:center;position:relative;
-    box-shadow:0 3px 10px rgba(0,0,0,.25);
-  }
-  .card.is-me{border-color:var(--gold);box-shadow:0 0 0 2px rgba(199,162,74,.35),0 3px 10px rgba(0,0,0,.25);}
-  .card .name{
-    width:100%;background:transparent;border:none;color:var(--parchment);font-family:'Fraunces',serif;
-    font-size:15.5px;font-weight:500;text-align:center;border-bottom:1px dashed transparent;padding:2px 0;
-  }
-  .card .name:hover, .card .name:focus{border-bottom-color:var(--sage-line);outline:none;}
-  .card .sexrow{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:2px;}
-  .field-label{
-    font-size:9px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);
-    opacity:.75;margin:8px 0 1px;font-family:'Work Sans',sans-serif;
-  }
-  .card .field-label:first-child{margin-top:0;}
-  .card .totem{
-    width:100%;background:transparent;border:none;color:var(--muted);font-family:'Work Sans',sans-serif;
-    font-size:11px;text-align:center;border-bottom:1px dashed transparent;padding:1px 0;font-style:italic;
-  }
-  .card .totem:hover, .card .totem:focus{border-bottom-color:var(--sage-line);outline:none;}
-  .card .addedby{font-size:9.5px;color:var(--muted);opacity:.7;margin-top:3px;}
-  .card select.sex{
-    background:transparent;color:var(--muted);border:none;font-size:11px;font-family:'Work Sans',sans-serif;
-  }
-  .term-tag{
-    display:inline-block;margin-top:5px;font-size:11.5px;padding:2px 9px;border-radius:20px;
-    background:rgba(126,148,104,0.18);color:var(--sage);border:1px solid rgba(126,148,104,0.35);
-  }
-  .term-tag.skew{background:rgba(199,162,74,0.16);color:var(--gold-soft);border-color:rgba(199,162,74,0.4);}
-  .term-tag.me{background:var(--gold);color:#20200F;border-color:var(--gold);font-weight:600;}
-  .cat{display:block;font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;}
+/* an empty socket where somebody's parents will go */
+.pod.socket{
+  background:transparent; border-style:dashed; border-color:var(--pod-edge);
+  box-shadow:none; min-height:38px; width:112px;
+}
+.pod.socket .nm{
+  font-family:'Karla',sans-serif; font-size:11.5px; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--muted);
+}
+.pod.socket:hover{border-color:var(--gold); border-style:solid;}
+.pod.socket:hover .nm{color:var(--gold);}
 
-  .mini-actions{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:2px;}
-  .mini-btn{
-    font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--card-border);
-    background:transparent;color:var(--muted);cursor:pointer;
-  }
-  .mini-btn:hover{color:var(--gold-soft);border-color:var(--gold);}
-  .card-extra{margin-top:4px;}
-  .sprout-btn{color:var(--gold-soft);border-color:rgba(199,162,74,0.55);}
-  .sprout-btn:hover{background:rgba(199,162,74,0.12);}
-  .order-btns{display:flex;flex-direction:column;position:absolute;right:-20px;top:6px;gap:1px;}
-  .order-btns button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;line-height:1;padding:2px;}
-  .order-btns button:hover{color:var(--gold-soft);}
+/* ── buds: the four ways the tree can grow ──────────────────────────── */
+.bud{
+  position:absolute; transform:translate(-50%,-50%);
+  display:flex; align-items:center; gap:6px;
+  padding:6px 12px 6px 9px; border-radius:999px;
+  background:var(--pod); border:1.5px dashed var(--gold-soft); color:var(--gold);
+  font-size:11.5px; font-weight:700; letter-spacing:.05em;
+  white-space:nowrap; cursor:pointer; box-shadow:var(--shadow);
+  animation:bud .24s ease-out backwards;
+}
+.bud:hover{background:var(--gold); border-style:solid; border-color:var(--gold); color:var(--pod);}
+.bud:focus-visible{outline:2.5px solid var(--gold); outline-offset:3px;}
+.bud i{font-style:normal; font-size:13px; line-height:1;}
+@keyframes bud{from{opacity:0; transform:translate(-50%,-50%) scale(.4);}}
 
-  .inline-form{
-    margin-top:6px;background:var(--bg-panel);border:1px solid var(--card-border);border-radius:10px;
-    padding:10px;display:flex;flex-direction:column;gap:6px;min-width:190px;
-  }
-  .inline-form input[type=text]{
-    background:var(--bg-deep);border:1px solid var(--card-border);color:var(--parchment);
-    border-radius:6px;padding:6px 8px;font-size:13px;font-family:'Work Sans',sans-serif;
-  }
-  .inline-form .row{display:flex;gap:6px;}
-  .inline-form select{background:var(--bg-deep);color:var(--parchment);border:1px solid var(--card-border);border-radius:6px;font-size:13px;}
-  .inline-form .actions{display:flex;gap:6px;justify-content:flex-end;}
-  .inline-form .actions button{font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--parchment);cursor:pointer;}
-  .inline-form .actions .go{background:var(--gold);color:#20200F;border-color:var(--gold);font-weight:600;}
+/* what this person is to you, in the family's own words */
+.term{
+  position:absolute; transform:translate(-50%,-50%);
+  max-width:230px; padding:8px 14px; border-radius:16px 5px 16px 5px;
+  background:var(--leaf); color:var(--sky); box-shadow:var(--lift);
+  text-align:center; pointer-events:auto; cursor:pointer;
+  animation:bud .24s ease-out backwards;
+}
+.term b{
+  display:block; font-family:'Fraunces',Georgia,serif;
+  font-size:17px; font-weight:600; letter-spacing:.01em;
+}
+.term span{display:block; font-size:10.5px; line-height:1.4; opacity:.85; margin-top:2px;}
+.term.none{background:var(--pod); color:var(--muted); border:1.5px dashed var(--pod-edge);}
+.term.none b{color:var(--ink); font-size:13px;}
 
-  .confirm-bar{background:var(--bg-panel);border:1px solid var(--danger);border-radius:10px;padding:10px 14px;display:flex;gap:10px;align-items:center;margin-bottom:14px;font-size:13.5px;}
+/* ── the grow form ──────────────────────────────────────────────────── */
+#form{
+  position:absolute; transform:translate(-50%,-50%); z-index:40;
+  width:252px; padding:15px; border-radius:22px 6px 22px 6px;
+  background:var(--pod); border:2px solid var(--gold);
+  box-shadow:var(--lift); animation:bud .2s ease-out backwards;
+  max-height:calc(100vh - 110px); overflow-y:auto;   /* short screens still reach Grow */
+}
+#form .cap{
+  font-size:10.5px; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--muted); margin:0 0 10px; line-height:1.5;
+}
+#form .cap b{color:var(--gold); font-weight:700;}
+#form .relline{
+  margin:0 0 12px; padding:9px 11px; border-radius:12px 4px 12px 4px;
+  background:var(--leaf); color:var(--sky);
+}
+#form .relline b{
+  display:block; font-family:'Fraunces',Georgia,serif; font-size:18px; font-weight:600;
+}
+#form .relline span{display:block; font-size:11px; line-height:1.45; opacity:.88;}
+.btn.wide{width:100%; flex:none; margin-bottom:8px; text-align:center;}
 
-  footer.note{color:var(--muted);font-size:12px;margin-top:30px;line-height:1.5;max-width:700px;}
+/* somebody by this name may already be in the tree */
+#form .dupes{margin:0 0 10px;}
+#form .dupe{
+  display:flex; align-items:center; gap:8px; width:100%;
+  padding:8px 10px; margin-bottom:6px; border-radius:12px 4px 12px 4px;
+  background:var(--pod-hi); border:1.5px solid var(--gold-soft);
+  color:var(--ink); font-family:'Karla',sans-serif; font-size:12px;
+  text-align:left; cursor:pointer;
+}
+#form .dupe:hover{border-color:var(--gold); background:var(--pod);}
+#form .dupe u{
+  flex:1; text-decoration:none; display:block;
+  font-family:'Fraunces',Georgia,serif; font-size:14px; font-weight:500;
+}
+#form .dupe u small{
+  display:block; font-family:'Karla',sans-serif; font-size:10.5px;
+  color:var(--muted); font-weight:400; margin-top:1px;
+}
+#form .dupe em{
+  font-style:normal; font-size:10.5px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--gold); white-space:nowrap;
+}
+#form .dupe[disabled]{opacity:.6; cursor:default; border-style:dashed;}
+#form .warn{
+  margin:0 0 10px; padding:8px 11px; border-radius:10px;
+  background:rgba(156,97,25,.1); border:1px solid var(--gold-soft);
+  color:var(--ink); font-size:11.5px; line-height:1.45;
+}
+
+/* the review panel */
+#form.wide{width:min(420px, calc(100vw - 32px));}
+#form .pair{
+  padding:11px; margin-bottom:9px; border-radius:14px 4px 14px 4px;
+  background:var(--pod-hi); border:1.5px solid var(--pod-edge);
+}
+#form .pair .two{display:flex; gap:8px; margin-bottom:8px;}
+#form .pair .two button{
+  flex:1; padding:9px; border-radius:10px; cursor:pointer; text-align:left;
+  background:var(--pod); border:1.5px solid var(--pod-edge); color:var(--ink);
+  font-family:'Fraunces',Georgia,serif; font-size:14px;
+}
+#form .pair .two button:hover{border-color:var(--gold);}
+#form .pair .two button small{
+  display:block; font-family:'Karla',sans-serif; font-size:10px;
+  color:var(--muted); margin-top:2px;
+}
+#form .pair p{margin:0 0 8px; font-size:11px; line-height:1.45; color:var(--muted);}
+#form .pair .keepnote{
+  font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--gold);
+  font-weight:700; margin-bottom:7px;
+}
+#form .pair .keepnote span{
+  display:block; color:var(--muted); font-weight:600; margin-top:3px;
+}
+#form .pair.weak{border-style:dashed;}
+#form .pair.weak .keepnote{color:var(--muted);}
+#form .pair .against{color:var(--muted); font-style:italic;}
+.btn.ghost.on{background:var(--leaf); border-color:var(--leaf); color:var(--sky);}
+#form .lbl{
+  font-size:10px; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--muted); margin:2px 0 6px;
+}
+.fld{
+  width:100%; padding:9px 11px; margin-bottom:8px;
+  background:var(--pod-hi); border:1.5px solid var(--pod-edge); border-radius:9px;
+  color:var(--ink); font-family:'Karla',sans-serif; font-size:15px;
+}
+.fld:focus{outline:none; border-color:var(--gold);}
+.fld::placeholder{color:var(--muted); opacity:.8;}
+.seg{display:flex; gap:5px; margin-bottom:10px;}
+.seg button{
+  flex:1; padding:7px 0; border-radius:8px; cursor:pointer;
+  background:transparent; border:1.5px solid var(--pod-edge); color:var(--muted);
+  font-family:'Karla',sans-serif; font-size:12px; font-weight:600;
+}
+.seg button[aria-pressed="true"]{background:var(--gold); border-color:var(--gold); color:var(--pod);}
+.row{display:flex; gap:7px;}
+.btn{
+  flex:1; padding:9px 0; border-radius:9px; cursor:pointer;
+  font-family:'Karla',sans-serif; font-size:13px; font-weight:700; letter-spacing:.03em;
+  background:var(--gold); border:1.5px solid var(--gold); color:var(--pod);
+}
+.btn.ghost{background:transparent; color:var(--muted); border-color:var(--pod-edge); flex:0 0 76px;}
+.btn:hover{background:var(--gold-soft); border-color:var(--gold-soft);}
+.btn.ghost:hover{background:transparent; color:var(--ink); border-color:var(--muted);}
+
+/* ── first run ──────────────────────────────────────────────────────── */
+#seed{
+  position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(430px,calc(100vw - 36px)); text-align:center; z-index:50;
+}
+#seed h1{
+  font-family:'Fraunces',Georgia,serif; font-weight:600; font-size:clamp(31px,6vw,46px);
+  margin:0 0 8px; letter-spacing:.01em;
+}
+#seed h1 em{font-style:normal; color:var(--gold);}
+#seed p{color:var(--muted); font-size:15px; line-height:1.6; margin:0 auto 22px; max-width:34ch;}
+#seed .box{
+  padding:18px; border-radius:26px 8px 26px 8px;
+  background:var(--pod); border:1.5px solid var(--pod-edge); box-shadow:var(--lift);
+  text-align:left;
+}
+#seed .box .btn{width:100%;}
+
+/* ── chrome ─────────────────────────────────────────────────────────── */
+#bar{
+  position:fixed; left:14px; bottom:14px; z-index:45;
+  display:flex; align-items:center; gap:2px; padding:6px;
+  background:var(--pod); border:1.5px solid var(--pod-edge);
+  border-radius:999px; box-shadow:var(--shadow);
+}
+#bar button{
+  padding:7px 13px; border-radius:999px; cursor:pointer;
+  background:transparent; border:none; color:var(--muted);
+  font-family:'Karla',sans-serif; font-size:12.5px; font-weight:600;
+}
+#bar button:hover{background:var(--pod-hi); color:var(--ink);}
+#bar .tally{
+  padding:0 12px 0 10px; color:var(--muted); font-size:12px;
+  border-left:1px solid var(--pod-edge); margin-left:4px;
+}
+#bar .tally b{color:var(--ink); font-weight:700; font-variant-numeric:tabular-nums;}
+#bar .who{
+  padding:7px 13px; border-radius:999px; border:1.5px solid var(--pod-edge);
+  color:var(--muted); font-weight:600; cursor:pointer; white-space:nowrap;
+}
+#bar .who b{color:var(--leaf); font-weight:700;}
+#bar .who.active{background:var(--leaf); border-color:var(--leaf); color:var(--sky);}
+#bar .who.active b{color:var(--sky);}
+#bar .dupes{
+  padding:7px 13px; border-radius:999px; cursor:pointer; white-space:nowrap;
+  background:rgba(156,97,25,.14); border:1.5px solid var(--gold-soft); color:var(--gold);
+  font-family:'Karla',sans-serif; font-size:12.5px; font-weight:700;
+}
+#bar .dupes:hover{background:var(--gold); border-color:var(--gold); color:var(--pod);}
+#hint{
+  position:fixed; right:16px; bottom:18px; z-index:45; max-width:240px;
+  margin:0; text-align:right; color:var(--muted); font-size:11.5px; line-height:1.55;
+  pointer-events:none;   /* a caption should never swallow a click */
+}
+#hint b{color:var(--gold); font-weight:700;}
+.sr{position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0);}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms !important; transition-duration:.01ms !important;}
+}
+@media (max-width:600px){
+  #hint{display:none;}
+  .term{max-width:200px;}
+  #bar button{padding:7px 10px; font-size:12px;}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <h1>Muti we<span class="accent">Mhuri</span></h1>
-    <p class="subtitle">A shared family tree — anchored at the top by default, with a "⇅/⇄" toggle to switch to left-to-right for very deep lines. Any branch can fold itself away with "▾ fold branch" once it gets crowded. Anyone with this page can add to it. Pick someone as "you" below and every label recalculates around them.</p>
-    <div class="toolbar">
-      <input id="contributorName" type="text" placeholder="Your name (tags what you add)" style="width:200px;">
-      <select id="egoSelect"></select>
-      <button id="refreshBtn" class="btn-ghost" title="Pull in anything others have added">↻ Refresh</button>
-      <button id="orientBtn" class="btn-ghost" title="Switch between top-down and left-to-right">⇅ Top-down</button>
-      <button id="newBranchBtn" class="btn-ghost" title="Start a separate, unconnected line — useful for a different aspect of the family">+ New branch</button>
-      <button id="toggleLegend">How this works ▾</button>
-      <button id="resetBtn" class="btn-ghost">Reset tree</button>
-    </div>
-  </header>
-
-  <div id="confirmBar" class="confirm-bar" style="display:none;">
-    <span>Erase the whole shared tree for everyone and start over? This can't be undone.</span>
-    <button class="btn btn-danger" id="confirmYes">Yes, erase it</button>
-    <button class="btn" id="confirmNo">Cancel</button>
-  </div>
-
-  <div class="legend" id="legend">
-    <h2>Why there's no "aunt," "uncle," or "cousin"</h2>
-    <p>English kinship is <b>descriptive</b> — it names an exact biological link, so every relative gets a distinct label. Shona kinship is <b>classificatory</b> — it groups relatives by generation, side of the family, and seniority, so whole categories of people share one term.</p>
-    <h3>Your parents' generation</h3>
-    <div class="termlist">
-      <div><b>Babamukuru</b> — father's older brother (a senior "father")</div>
-      <div><b>Babamunini</b> — father's younger brother (a junior "father")</div>
-      <div><b>Amaiguru</b> — mother's older sister (a senior "mother")</div>
-      <div><b>Amainini</b> — mother's younger sister (a junior "mother")</div>
-      <div><b>Tete</b> — father's sister, any age (her own distinct, senior role)</div>
-      <div><b>Sekuru</b> — mother's brother, any age (his own distinct, respected role)</div>
-    </div>
-    <h3>Your own generation</h3>
-    <p>Children of your father's brothers or your mother's sisters are your <b>siblings</b> — Mukoma/Munin'ina if the same sex as you, Hanzvadzi if not — never "cousins." Children of your father's sister or your mother's brother are cross-cousins, and the terms skew sideways instead: you and your mother's-brother's children call each other <b>Sekuru / Muzukuru</b>; you and your father's-sister's children call each other <b>Muzukuru / Sekuru</b> the other way.</p>
-    <h3>Deeper down the tree</h3>
-    <p>That sideways skew doesn't stop at first cousins. Traditionally your mother's whole line of brothers, and their sons, and their sons' sons, keep being called <b>Sekuru</b> no matter how many generations pass — and the mirror line, through a father's sister's descendants, keeps being called <b>Muzukuru</b>. This tool applies that rule automatically once your tree grows past first cousins.</p>
-    <h3>Elders and in-laws</h3>
-    <div class="termlist">
-      <div><b>Sekuru / Ambuya</b> — both grandfathers / both grandmothers, and beyond</div>
-      <div><b>Muzukuru</b> — grandchildren, nieces, nephews, and further descendants</div>
-      <div><b>Tsano</b> — wife's brother</div>
-      <div><b>Muramu</b> — wife's sister</div>
-      <div><b>Mukuwasha / Muroora</b> — son-in-law / daughter-in-law</div>
-      <div><b>Murume / Mukadzi</b> — husband / wife</div>
-    </div>
-    <h3>Totem — Mutupo / Chidao</h3>
-    <p>Every Shona person also carries a <b>mutupo</b> (totem, often an animal — Shumba/lion, Nzou/elephant, Shava/eland, Moyo/heart, Soko/monkey, and many more) plus a linked praise name, or <b>chidao</b>. It passes down the father's line only — you take your father's totem, not your mother's — which is exactly why it maps onto the same patriline that "Baba," "Sekuru," and "Muzukuru" already trace. Sharing a totem marks two people as belonging to the same clan even generations apart with no traceable link on paper, and marrying within your own totem is traditionally avoided. There's a field on each card to record it as your tree grows.</p>
-    <h3>Relationships beyond blood and marriage</h3>
-    <div class="termlist">
-      <div><b>Sahwira</b> — a chosen, non-blood ceremonial friend, often bound to a specific family for generations; carries real duties at funerals and other rites of passage</div>
-      <div><b>Chiramu</b> — the licensed, joking familiarity between a man and his wife's younger sisters (muramu)</div>
-      <div><b>Roora</b> — bride-wealth paid by the groom's family to the bride's; it's the ceremony where Tete and Sekuru formally exercise their negotiating roles, so it's woven into why those two terms carry real authority rather than just naming a relative</div>
-    </div>
-    <p class="note">Usage shifts by clan, region, and family — and families disagree on details like whether cousin-seniority follows the parents' birth order or the cousins' own ages (this tool defaults to the parents' order; use the ▲▼ arrows to re-rank siblings if yours works differently). Treat this as a solid starting frame, not the final word — refine it together as your tree grows.</p>
-  </div>
-
-  <div id="forest" class="forest"></div>
-
-  <footer class="note">This tree is <b>shared</b> — anyone who opens this page can see and add to it, so avoid sensitive personal details. Every person — including a spouse who married in — gets their own "↑ Parents" button once no ancestors are recorded for them; using it inserts a new generation above (or to the left, in left-right mode) and pushes everything else along, so the anchor point always stays the furthest-back generation anyone has entered. Each couple's "↓ Child" grows a new branch that becomes its own little family tree once that child finds a spouse of their own. Any branch with children can be folded with "▾ fold branch" — it collapses to a "▸ N more" chip you can tap to reopen, which keeps a big tree manageable. The layout toggle and fold state are personal to you; they don't change what anyone else sees. Hit "↻ Refresh" if you think someone else has added to it recently.</footer>
+<div id="stage">
+  <div id="sky"></div>
+  <div id="ground"></div>
+  <div id="groundline"></div>
+  <svg id="canvas"><g id="gtree" class="layer"></g></svg>
+  <div id="pods" class="layer"></div>
+  <div id="buds"></div>
 </div>
 
+<div id="seed">
+  <h1>The <em>Baobab</em> Project</h1>
+  <p>A baobab is mostly roots. Plant one person — anyone at all — and grow the family outward from them.</p>
+  <div class="box">
+    <input id="seedName" class="fld" placeholder="A name to start with" autocomplete="off">
+    <button class="btn" id="seedGo">Plant the first person</button>
+  </div>
+</div>
+
+<div id="bar" hidden>
+  <button id="fit">Fit</button>
+  <button id="undo">Undo</button>
+  <button id="clear">Clear</button>
+  <button class="who" id="who">You: <b>—</b></button>
+  <button class="dupes" id="dupes" hidden></button>
+  <span class="tally"><b id="count">0</b> in the tree</span>
+</div>
+
+<p id="hint" hidden>Tap anyone to see where the tree can grow.<br><b>Roots</b> run down into the soil, <b>branches</b> reach up.</p>
+<div id="live" class="sr" aria-live="polite"></div>
+
 <script>
-// This app was originally built as a Claude.ai artifact, which provides a
-// built-in `window.storage` API. A real deployed website doesn't have that,
-// so this shim reimplements the exact same interface on top of:
-//   - fetch() + this server's tiny /api/shared/:key endpoint, for shared=true
-//   - localStorage, for shared=false (personal prefs — never leave the browser)
-// Nothing below this block needed to change as a result.
-window.storage = {
-  async get(key, shared) {
-    try {
-      if (shared) {
-        const res = await fetch('/api/shared/' + encodeURIComponent(key));
-        if (!res.ok) return null;
-        const data = await res.json();
-        return (data && data.value !== null && data.value !== undefined)
-          ? { key, value: data.value, shared: true }
-          : null;
-      } else {
-        const v = localStorage.getItem(key);
-        return v !== null ? { key, value: v, shared: false } : null;
-      }
-    } catch (e) {
-      console.error('storage.get failed', e);
-      return null;
-    }
-  },
-  async set(key, value, shared) {
-    try {
-      if (shared) {
-        const res = await fetch('/api/shared/' + encodeURIComponent(key), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value })
-        });
-        if (!res.ok) return null;
-        return { key, value, shared: true };
-      } else {
-        localStorage.setItem(key, value);
-        return { key, value, shared: false };
-      }
-    } catch (e) {
-      console.error('storage.set failed', e);
-      return null;
-    }
-  },
-  async delete(key, shared) {
-    try {
-      if (shared) {
-        const res = await fetch('/api/shared/' + encodeURIComponent(key), { method: 'DELETE' });
-        if (!res.ok) return null;
-        return { key, deleted: true, shared: true };
-      } else {
-        localStorage.removeItem(key);
-        return { key, deleted: true, shared: false };
-      }
-    } catch (e) {
-      console.error('storage.delete failed', e);
-      return null;
-    }
-  },
-  async list(prefix, shared) {
-    try {
-      if (shared) {
-        const res = await fetch('/api/shared?prefix=' + encodeURIComponent(prefix || ''));
-        if (!res.ok) return null;
-        const data = await res.json();
-        return { keys: data.keys || [], prefix, shared: true };
-      } else {
-        const keys = Object.keys(localStorage).filter(k => !prefix || k.startsWith(prefix));
-        return { keys, prefix, shared: false };
-      }
-    } catch (e) {
-      console.error('storage.list failed', e);
-      return null;
-    }
-  }
+/* ════════════════════════════════════════════════════════════════════════
+   The Baobab Project — a Shona family tree.
+
+   The model is deliberately small. People sit in unions; a union is one or
+   two partners plus their children. Everything else the tree knows how to
+   say — siblings, grandparents, cousins — falls out of those two facts,
+   which is why naming one person in relation to somebody instantly wires up
+   the rest of their connections.
+
+     person : { id, name, sex:'f'|'m'|'', totem }
+     union  : { id, partners:[personId], children:[personId] }
+
+   Generation 0 is whoever was planted first. Ancestors count downward and
+   are drawn below the horizon as roots; descendants count upward into the
+   canopy. Nothing in the layout needs to know which is which — it lays out
+   one forest and the horizon does the rest.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const KEY = 'muti-baobab-v1';
+
+const POD_W = 132, POD_H = 48;
+const COUPLE_GAP = 30;     // between two partners
+const SIB_GAP = 46;        // between sibling families
+const LEVEL = 172;         // between generations
+
+let state = { people:{}, unions:{}, rootId:null, seq:1 };
+let history = [];
+let sel = null;
+let pending = null;
+let pos = { x:0, y:0, k:1 };
+let layout = { persons:{}, blocks:[], links:[] };
+let fresh = new Set();
+let budSig = '';                    // which buds are currently on screen
+let meId = null;                    // who is looking — this device only
+let pickingMe = false;
+
+const $ = id => document.getElementById(id);
+const stage = $('stage'), gtree = $('gtree'), podsEl = $('pods');
+
+/* ── model ──────────────────────────────────────────────────────────── */
+const uid = p => p + (state.seq++);
+const people = () => Object.values(state.people);
+const unions = () => Object.values(state.unions);
+
+const parentUnionOf = id => unions().find(u => u.children.includes(id)) || null;
+const unionsOf = id => unions().filter(u => u.partners.includes(id));
+const partnersOf = id => unionsOf(id).flatMap(u => u.partners.filter(p => p !== id && state.people[p]));
+
+// Where somebody sits among their brothers and sisters, eldest first.
+const birthRank = id => {
+  const pu = parentUnionOf(id);
+  return pu ? pu.children.indexOf(id) : -1;
 };
-</script>
-<script>
-let people = {};
-let meId = null;
-let myName = '';
-let nextId = 1;
-let orientation = 'down'; // 'down' (top-down) or 'right' (left-to-right)
-let collapsed = new Set(); // person ids whose children are folded away
+const sibCount = id => {
+  const pu = parentUnionOf(id);
+  return pu ? pu.children.length : 1;
+};
 
-function genId(){ return 'p' + (nextId++); }
-
-function seedDefault(){
-  people = {};
-  nextId = 1;
-  const gf = genId(), gm = genId();
-  people[gf] = {id:gf, name:'Great-Grandfather', sex:'M', totem:'', fatherId:null, motherId:null, spouseId:gm, order:0, addedBy:''};
-  people[gm] = {id:gm, name:'Great-Grandmother', sex:'F', totem:'', fatherId:null, motherId:null, spouseId:gf, order:0, addedBy:''};
+function addPerson(name, sex, totem, born, died){
+  const id = uid('p');
+  state.people[id] = {
+    id, name:name.trim(), sex:sex || '', totem:(totem || '').trim(),
+    born:(born || '').trim(), died:(died || '').trim(), root:false
+  };
+  fresh.add(id);
+  return id;
 }
 
-async function loadData(){
-  // shared tree data — visible to everyone who opens this artifact
-  try{
-    const shared = await window.storage.get('family-tree-people', true);
-    if(shared && shared.value){
-      const parsed = JSON.parse(shared.value);
-      people = parsed.people || {};
-      nextId = parsed.nextId || 1;
-      if(Object.keys(people).length === 0) seedDefault();
-    } else {
-      // one-time migration from an earlier private version of this tree, if present
-      let migrated = false;
-      try{
-        const legacy = await window.storage.get('family-tree-data', false);
-        if(legacy && legacy.value){
-          const parsedLegacy = JSON.parse(legacy.value);
-          if(parsedLegacy.people && Object.keys(parsedLegacy.people).length){
-            people = parsedLegacy.people; nextId = parsedLegacy.nextId || 1; migrated = true;
-          }
-        }
-      } catch(e){ /* no legacy data, ignore */ }
-      if(!migrated) seedDefault();
-      await saveData();
+/* Marking somebody as the root of the line says "this is as far back as we
+   can trace" — the tree stops asking for their parents and draws them as the
+   taproot everything else grows from. */
+function toggleRoot(id){
+  const p = state.people[id];
+  if (!p) return;
+  snapshot();
+  p.root = !p.root;
+}
+function addUnion(partners, children){
+  const id = uid('u');
+  state.unions[id] = { id, partners:partners.slice(), children:children.slice() };
+  return state.unions[id];
+}
+function snapshot(){
+  history.push(JSON.stringify(state));
+  if (history.length > 50) history.shift();
+}
+
+/* Grow a new person off an existing one. Each branch also creates the
+   connections the new person implies — a sibling inherits your parents, a
+   child gets both of yours — so they can branch out immediately themselves.
+
+   opts.position  'older' | 'younger'  where a new sibling lands in the row
+   opts.unionId   which marriage a new child belongs to, when there are several */
+function grow(kind, anchorId, name, sex, totem, opts){
+  opts = opts || {};
+  snapshot();
+  const id = addPerson(name, sex, totem, opts.born, opts.died);
+
+  if (kind === 'parent'){
+    const pu = parentUnionOf(anchorId);
+    if (pu) pu.partners.push(id);          // joins the union, so gains every sibling
+    else addUnion([id], [anchorId]);
+  }
+  else if (kind === 'sibling'){
+    const pu = parentUnionOf(anchorId) || addUnion([], [anchorId]);
+    const at = pu.children.indexOf(anchorId);
+    pu.children.splice(opts.position === 'older' ? at : at + 1, 0, id);
+  }
+  else if (kind === 'partner'){
+    // fill a marriage that only has one name in it, otherwise start a new one
+    const solo = unionsOf(anchorId).find(u => u.partners.length === 1);
+    if (solo) solo.partners.push(id);
+    else addUnion([anchorId, id], []);
+  }
+  else if (kind === 'child'){
+    let u = opts.unionId ? state.unions[opts.unionId] : null;
+    if (!u || !u.partners.includes(anchorId)) u = unionsOf(anchorId)[0];
+    if (!u) u = addUnion([anchorId], []);
+    u.children.push(id);                   // newest is youngest
+  }
+  return id;
+}
+
+/* Move somebody one place among their brothers and sisters. */
+function reorder(id, dir){
+  const pu = parentUnionOf(id);
+  if (!pu) return;
+  const at = pu.children.indexOf(id), to = at + dir;
+  if (at < 0 || to < 0 || to >= pu.children.length) return;
+  snapshot();
+  pu.children.splice(at, 1);
+  pu.children.splice(to, 0, id);
+}
+
+function removePerson(id){
+  snapshot();
+  delete state.people[id];
+  for (const u of unions()){
+    u.partners = u.partners.filter(p => p !== id);
+    u.children = u.children.filter(c => c !== id);
+    const pointless = (!u.partners.length && u.children.length < 2) ||
+                      (u.partners.length <= 1 && !u.children.length);
+    if (pointless) delete state.unions[u.id];
+  }
+  if (state.rootId === id) state.rootId = people().length ? people()[0].id : null;
+}
+
+/* ── the same person, entered twice ─────────────────────────────────────
+   A dozen relatives filling one tree from different directions will meet in
+   the middle, and when they do the same grandfather gets typed twice. Titles
+   make it harder to spot: one person enters "Sekuru Garikai", another enters
+   "Garikai Chirwa", and nothing matches on the surface.
+
+   So names are stripped of the kin titles people naturally attach before
+   they are compared, and the evidence around each name — birth years, sex,
+   who their parents are — is weighed for and against. */
+
+const TITLES = new Set([
+  'sekuru','tateguru','ambuya','mbuya','gogo','baba','babamukuru','babamunini',
+  'amai','mai','mainini','maiguru','tete','vatete','mudhara','mukoma','muninina',
+  'sisi','bhudhi','va','mr','mrs','ms','dr','the','late'
+]);
+
+function nameTokens(name){
+  return String(name || '')
+    .toLowerCase()
+    .replace(/['’.]/g, '')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .split(/[\s-]+/)
+    .filter(t => t && !TITLES.has(t));
+}
+
+function editDistance(a, b){
+  if (a === b) return 0;
+  if (!a.length || !b.length) return Math.max(a.length, b.length);
+  let prev = Array.from({ length:b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++){
+    const row = [i];
+    for (let j = 1; j <= b.length; j++){
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i-1] === b[j-1] ? 0 : 1));
     }
-  } catch(e){
-    seedDefault();
+    prev = row;
   }
-  // personal preferences — just for this device/person, never shared
-  try{
-    const mine = await window.storage.get('family-tree-my-prefs', false);
-    if(mine && mine.value){
-      const p = JSON.parse(mine.value);
-      meId = p.meId || null;
-      myName = p.myName || '';
-      orientation = p.orientation === 'right' ? 'right' : 'down';
-      collapsed = new Set(Array.isArray(p.collapsed) ? p.collapsed : []);
-    }
-  } catch(e){ /* no personal prefs yet */ }
-  render();
+  return prev[b.length];
 }
 
-async function saveData(){
-  try{
-    await window.storage.set('family-tree-people', JSON.stringify({people, nextId}), true);
-  } catch(e){ console.error('Save failed', e); }
-}
+const closeEnough = (a, b) => {
+  if (a === b) return true;
+  const d = editDistance(a, b);
+  return a.length >= 4 && b.length >= 4 && d <= (Math.min(a.length, b.length) >= 7 ? 2 : 1);
+};
 
-async function saveMyPrefs(){
-  try{
-    await window.storage.set('family-tree-my-prefs', JSON.stringify({meId, myName, orientation, collapsed: Array.from(collapsed)}), false);
-  } catch(e){ console.error('Pref save failed', e); }
-}
-
-function childrenOf(idA, idB){
-  return Object.values(people)
-    .filter(p => (p.fatherId && (p.fatherId === idA || p.fatherId === idB)) ||
-                 (p.motherId && (p.motherId === idA || p.motherId === idB)))
-    .sort((a,b) => a.order - b.order);
-}
-
-function getRootIds(){
-  const roots = []; const claimedSpouse = new Set();
-  const all = Object.values(people).filter(p => !p.fatherId && !p.motherId);
-  for(const p of all){
-    if(claimedSpouse.has(p.id)) continue;
-    const spouse = p.spouseId ? people[p.spouseId] : null;
-    if(spouse && (spouse.fatherId || spouse.motherId)) continue;
-    roots.push(p.id);
-    if(spouse) claimedSpouse.add(spouse.id);
-  }
-  return roots;
-}
-
-function countDescendants(personId){
-  const p = people[personId];
-  if(!p) return 0;
-  const kids = childrenOf(personId, p.spouseId);
-  let count = kids.length;
-  kids.forEach(k => { count += countDescendants(k.id); });
-  return count;
-}
-
-/* ---------- relationship engine ---------- */
-
-function ancestorMap(startId){
-  const map = new Map();
-  function rec(id, dist, path){
-    if(map.has(id) && map.get(id).dist <= dist) return;
-    map.set(id, {dist, path});
-    const p = people[id]; if(!p) return;
-    if(p.fatherId) rec(p.fatherId, dist+1, [...path, p.fatherId]);
-    if(p.motherId) rec(p.motherId, dist+1, [...path, p.motherId]);
-  }
-  rec(startId, 0, [startId]);
-  return map;
-}
-
-function isFatherLineLink(fromId, toId){
-  // true if walking fromId -> father -> father ... reaches toId (toId is a patrilineal ancestor of/equal to fromId)
-  let cur = fromId; let guard = 0;
-  while(cur && guard++ < 40){
-    if(cur === toId) return true;
-    const p = people[cur]; if(!p || !p.fatherId) return false;
-    cur = p.fatherId;
-  }
+/* Two people cannot be the same if the tree already says they are related. */
+function mustBeDifferent(a, b){
+  if (a === b) return true;
+  if (partnersOf(a).includes(b)) return true;
+  const up = ancestry(a).up, down = ancestry(b).up;
+  if (up.has(b) || down.has(a)) return true;
+  const pu = parentUnionOf(a);
   return false;
 }
 
-function patriline(id){
-  const chain = []; let cur = id; let guard = 0;
-  while(cur && guard++ < 40){ chain.push(cur); const p = people[cur]; if(!p||!p.fatherId) break; cur = p.fatherId; }
-  return chain;
+/* How alike are two names, once titles are set aside? This is only ever the
+   opening question. */
+function nameSimilarity(nameA, nameB){
+  const ta = nameTokens(nameA), tb = nameTokens(nameB);
+  if (!ta.length || !tb.length) return null;
+  const shared = ta.filter(x => tb.some(y => closeEnough(x, y)));
+  if (!shared.length) return null;
+  if (ta.join(' ') === tb.join(' ')) return { score:0.34, why:'same name once the title is set aside' };
+  if (shared.length >= Math.min(ta.length, tb.length)) return { score:0.28, why:`both called ${shared.join(' ')}` };
+  return { score:0.18, why:`share the name ${shared.join(' ')}` };
 }
 
-function ruleA_sekuruLine(egoId, targetId){
-  const ego = people[egoId];
-  if(!ego.motherId) return false;
-  const mother = people[ego.motherId];
-  if(!mother || !mother.fatherId) return false;
-  const MF = mother.fatherId;
-  if(targetId === MF) return true;
-  if(isFatherLineLink(targetId, MF)) return true; // target is son/grandson.. of MF
-  if(isFatherLineLink(MF, targetId)) return true; // target is father/grandfather of MF
-  return false;
+/* Where somebody sits, in a phrase — enough to tell one Tendai from another. */
+function positionOf(id){
+  const bits = [];
+  const mates = partnersOf(id);
+  if (mates.length) bits.push(`married to ${state.people[mates[0]].name}`);
+  const par = parentsOf(id);
+  if (par.length) bits.push(`child of ${par.map(x => state.people[x].name).join(' and ')}`);
+  const kids = unionsOf(id).flatMap(u => u.children).filter(k => state.people[k]);
+  if (kids.length) bits.push(`parent of ${state.people[kids[0]].name}${kids.length > 1 ? ` and ${kids.length - 1} more` : ''}`);
+  return bits.slice(0, 2).join(' · ') || 'not connected to anyone yet';
 }
 
-function ruleB_muzukuruLine(egoId, targetId){
-  const chain = patriline(egoId); // [ego, father, father's father, ...]
-  for(const P of chain){
-    const kids = Object.values(people).filter(x => x.fatherId === P);
-    for(const k of kids){
-      if(k.sex !== 'F') continue;
-      if(k.id === targetId) return true;
-      if(isFatherLineLink(targetId, k.id)) return true; // target is her son/grandson...
+/* Are these two records one person?
+
+   A shared name is where this starts, never where it ends. Families name
+   children after their grandparents, and two cousins called Tendai are two
+   people. So the name only opens the question and the tree's own shape
+   answers it: sharing a husband or wife, a child, or a set of parents is
+   what makes two records one person, and standing a generation apart or
+   having different parents recorded is what keeps them separate. */
+function sameness(aId, bId, gens){
+  const a = state.people[aId], b = state.people[bId];
+  if (!a || !b || mustBeDifferent(aId, bId)) return null;
+
+  const nm = nameSimilarity(a.name, b.name);
+  if (!nm) return null;
+
+  const why = [nm.why];
+  const against = [];
+  let score = nm.score;
+
+  // ── generation ────────────────────────────────────────────────────────
+  const g = gens || generations();
+  if (g[aId] !== undefined && g[bId] !== undefined){
+    const d = Math.abs(g[aId] - g[bId]);
+    if (d === 0) score += 0.08;
+    else {
+      score -= Math.min(0.8, 0.45 * d);
+      against.push(d === 1 ? 'one generation apart — more likely named after them'
+                           : `${d} generations apart`);
     }
   }
-  return false;
+
+  // ── who they are married to ───────────────────────────────────────────
+  const mates = partnersOf(aId), theirs = partnersOf(bId);
+  const sharedMate = mates.filter(x => theirs.includes(x));
+  if (sharedMate.length){
+    score += 0.5; why.push(`both married to ${state.people[sharedMate[0]].name}`);
+  } else if (mates.length && theirs.length){
+    score -= 0.18; against.push('married to different people');
+  }
+
+  // ── whose children they are parents of ────────────────────────────────
+  const kidsA = unionsOf(aId).flatMap(u => u.children);
+  const kidsB = unionsOf(bId).flatMap(u => u.children);
+  const sharedKid = kidsA.filter(k => kidsB.includes(k));
+  if (sharedKid.length){
+    score += 0.5; why.push(`both parents of ${state.people[sharedKid[0]].name}`);
+  } else if (kidsA.length && kidsB.length){
+    score -= 0.12; against.push('different children recorded');
+  }
+
+  // ── whose children they are ───────────────────────────────────────────
+  const pa = parentUnionOf(aId), pb = parentUnionOf(bId);
+  if (pa && pb){
+    const setA = pa.partners.slice().sort().join(), setB = pb.partners.slice().sort().join();
+    if (pa.id === pb.id){ score += 0.4; why.push('listed twice among the same children'); }
+    else if (setA && setA === setB){ score += 0.4; why.push('the same parents'); }
+    else {
+      score -= 0.4;
+      against.push('different parents recorded — if those two are also one person, merge them first');
+    }
+  }
+
+  // ── the smaller corroborations ────────────────────────────────────────
+  const ya = birthYear(aId), yb = birthYear(bId);
+  if (ya && yb){
+    if (ya === yb){ score += 0.2; why.push(`both born ${ya}`); }
+    else if (Math.abs(ya - yb) > 2){ score -= 0.55; against.push(`born ${ya} and ${yb}`); }
+  }
+  if (a.sex && b.sex && a.sex !== b.sex){ score -= 0.6; against.push('recorded as different sexes'); }
+  if (a.totem && b.totem && a.totem.toLowerCase() === b.totem.toLowerCase()){
+    score += 0.12; why.push(`same totem, ${a.totem}`);
+  }
+
+  return {
+    score: Math.max(0, Math.min(1, score)),
+    why, against,
+    // a name on its own never gets past "possible"
+    strong: sharedMate.length > 0 || sharedKid.length > 0 || (pa && pb && pa.id === pb.id)
+  };
 }
 
-function relate(egoId, targetId){
-  if(!egoId || !targetId) return null;
-  if(egoId === targetId) return {term:'—', cat:'self'};
+const dismissedKey = (a, b) => [a, b].sort().join('|');
+const isDismissed = (a, b) =>
+  (state.notDuplicates || []).includes(dismissedKey(a, b));
 
-  const ego = people[egoId], target = people[targetId];
-  const spouse = ego.spouseId === targetId;
-  if(spouse) return {term: target.sex==='M' ? 'Murume' : 'Mukadzi', cat:'spouse'};
+/* Every pair worth a second look, strongest first. Generations are worked
+   out once and handed round — otherwise this walks the whole tree for every
+   pair it considers. */
+function duplicatePairs(threshold){
+  const ids = people().map(p => p.id);
+  const gens = generations();
+  const out = [];
+  for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++){
+    if (isDismissed(ids[i], ids[j])) continue;
+    const m = sameness(ids[i], ids[j], gens);
+    if (m && m.score >= (threshold ?? 0.5)) out.push({ a:ids[i], b:ids[j], ...m });
+  }
+  return out.sort((x, y) => y.score - x.score);
+}
+const likelyDuplicates = () => duplicatePairs().filter(d => d.strong || d.score >= 0.75);
 
-  // in-law: spouse's sibling
-  if(ego.spouseId){
-    const sp = people[ego.spouseId];
-    if(sp && sp.id !== target.id){
-      const sharesParent =
-        (sp.fatherId && (sp.fatherId === target.fatherId || sp.fatherId === target.motherId)) ||
-        (sp.motherId && (sp.motherId === target.fatherId || sp.motherId === target.motherId));
-      if(sharesParent) return {term: target.sex==='M' ? 'Tsano' : 'Muramu', cat:'in-law'};
-    }
-  }
-  // in-law: child's spouse
-  const myKids = Object.values(people).filter(p=>p.fatherId===egoId||p.motherId===egoId);
-  if(myKids.some(k=>k.spouseId===targetId)){
-    return {term: target.sex==='M' ? 'Mukuwasha' : 'Muroora', cat:'in-law'};
-  }
-  // in-law: spouse's parent
-  if(ego.spouseId){
-    const sp = people[ego.spouseId];
-    if(sp && (sp.fatherId===targetId || sp.motherId===targetId)){
-      return {term: target.sex==='M' ? 'Tezvara' : 'Ambuya', cat:'in-law'};
-    }
-  }
-
-  const egoAnc = ancestorMap(egoId);
-  const tgtAnc = ancestorMap(targetId);
-  let ncaId=null, best=Infinity;
-  for(const [id, info] of egoAnc){
-    if(tgtAnc.has(id)){
-      const total = info.dist + tgtAnc.get(id).dist;
-      if(total < best){ best = total; ncaId = id; }
-    }
-  }
-  if(ncaId===null) return {term:'Hukama husiri hweropa', cat:'unrelated'}; // no blood link found
-
-  const U = egoAnc.get(ncaId).dist;
-  const D = tgtAnc.get(ncaId).dist;
-  const egoPath = egoAnc.get(ncaId).path; // [ego,...,nca]
-  const tgtPath = tgtAnc.get(ncaId).path; // [target,...,nca]
-  const branchEgo = U>=1 ? egoPath[egoPath.length-2] : null;
-  const branchTgt = D>=1 ? tgtPath[tgtPath.length-2] : null;
-
-  if(U===0 && D===0) return {term:'—', cat:'self'};
-  if(U===0){ // target is ego's own descendant
-    if(D===1) return {term: target.sex==='M' ? 'Mwanakomana' : 'Mwanasikana', cat:'child'};
-    return {term:'Muzukuru', cat:'descendant'};
-  }
-  if(D===0){ // target is ego's own ancestor
-    if(U===1) return {term: target.sex==='M' ? 'Baba' : 'Amai', cat:'parent'};
-    return {term: target.sex==='M' ? 'Sekuru' : 'Ambuya', cat:'ancestor'};
-  }
-
-  if(U===1 && D===1){ // full/half sibling
-    if(ego.sex === target.sex){
-      return {term: target.order < ego.order ? 'Mukoma' : "Munin'ina", cat:'sibling'};
-    }
-    return {term:'Hanzvadzi', cat:'sibling'};
-  }
-  if(U===1 && D===2){ // sibling's child
-    return {term:'Muzukuru', cat:'niece/nephew'};
-  }
-  if(U===2 && D===1){ // parent's sibling
-    const parentSex = people[branchEgo].sex;
-    if(parentSex==='M'){
-      if(target.sex==='M') return {term: target.order < branchEgo.order ? 'Babamukuru' : 'Babamunini', cat:"father's sibling"};
-      return {term:'Tete', cat:"father's sister"};
-    } else {
-      if(target.sex==='F') return {term: target.order < branchEgo.order ? 'Amaiguru' : 'Amainini', cat:"mother's sibling"};
-      return {term:'Sekuru', cat:"mother's brother"};
-    }
-  }
-  if(U===2 && D===2){ // first cousins
-    const sexEgoSide = people[branchEgo].sex;
-    const sexTgtSide = people[branchTgt].sex;
-    if(sexEgoSide === sexTgtSide){ // parallel cousin -> sibling
-      const elderLine = people[branchTgt].order < people[branchEgo].order;
-      if(ego.sex === target.sex) return {term: elderLine ? 'Mukoma' : "Munin'ina", cat:'parallel cousin (sibling)'};
-      return {term:'Hanzvadzi', cat:'parallel cousin (sibling)'};
-    } else { // cross cousin -> skewed term
-      if(sexEgoSide==='M') return {term:'Muzukuru', cat:"cross-cousin (father's sister's line)"};
-      return {term:'Sekuru', cat:"cross-cousin (mother's brother's line)"};
-    }
-  }
-
-  // deeper extensions
-  if(target.sex==='M' && ruleA_sekuruLine(egoId, targetId)) return {term:'Sekuru', cat:"mother's brother's line (skewed)", skew:true};
-  if(ruleB_muzukuruLine(egoId, targetId)) return {term:'Muzukuru', cat:"father's sister's line (skewed)", skew:true};
-
-  if(D===1 && U>=3){
-    return {term: target.sex==='M' ? 'Sekuru' : 'Ambuya', cat:'elder relative'};
-  }
-  if(D>=2 && U>=1){
-    return {term:'Muzukuru', cat:'extended junior relative'};
-  }
-  return {term:'Hukama hwakati wandei', cat:'extended relative — customary term varies'};
+/* Candidates for a name being typed into the form. */
+function matchesForName(name, excludeId){
+  if (nameTokens(name).length === 0 || name.trim().length < 3) return [];
+  // Nothing is known about a name being typed except the name, so these are
+  // offered by name alone — which is why each one is shown with where they
+  // sit in the family, for you to judge rather than the tree.
+  return people()
+    .filter(p => p.id !== excludeId)
+    .map(p => ({ id:p.id, m:nameSimilarity(name, p.name) }))
+    .filter(x => x.m)
+    .sort((x, y) => y.m.score - x.m.score)
+    .slice(0, 3);
 }
 
-/* ---------- rendering ---------- */
+/* ── Shona kinship ──────────────────────────────────────────────────────
+   Shona kinship is classificatory: it sorts relatives by generation, by side
+   of the family and by seniority rather than naming each exact biological
+   link. Two consequences drive everything below.
 
-function els(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+   PARALLEL relatives fold into the direct line. Your father's brothers are
+   fathers to you — Babamukuru if senior to him, Babamunini if junior — your
+   mother's sisters are mothers, and the children of all of them are your
+   brothers and sisters. There is no word for cousin because there is no such
+   category.
 
-function personCard(p){
-  const isMe = meId === p.id;
-  let rel = null;
-  if(meId && meId !== p.id) rel = relate(meId, p.id);
-  const card = els(`<div class="card ${isMe?'is-me':''}"></div>`);
+   CROSS relatives skew sideways instead. Your father's sister is Tete, your
+   mother's brother is Sekuru, and the skew runs on down their lines: a
+   mother's-brother's descendants keep being Sekuru to you, and a
+   father's-sister's descendants keep being Muzukuru.
 
-  card.appendChild(els(`<div class="field-label">Name</div>`));
-  const nameInput = els(`<input class="name" type="text" value="${escapeAttr(p.name)}" placeholder="Zita / Name">`);
-  nameInput.addEventListener('change', e=>{ p.name = e.target.value; saveData(); });
-  card.appendChild(nameInput);
+   Families differ on the details — notably whether seniority among cousins
+   follows the parents' birth order or the children's own ages. This family
+   goes by the children's own ages, so telling Mukoma from Munin'ina across
+   two households needs both birth years. Without them the tree says so
+   plainly rather than guessing, and it always shows its working. */
 
-  const sexRow = els(`<div class="sexrow"></div>`);
-  const sexSel = els(`<select class="sex"><option value="M">he / him</option><option value="F">she / her</option></select>`);
-  sexSel.value = p.sex;
-  sexSel.addEventListener('change', e=>{ p.sex = e.target.value; saveData(); render(); });
-  sexRow.appendChild(sexSel);
-  card.appendChild(sexRow);
+function parentsOf(id){
+  const u = parentUnionOf(id);
+  return u ? u.partners.filter(x => state.people[x]) : [];
+}
 
-  card.appendChild(els(`<div class="field-label">Totem / Mutupo</div>`));
-  const totemInput = els(`<input class="totem" type="text" value="${escapeAttr(p.totem||'')}" placeholder="e.g. Shumba, Moyo, Soko...">`);
-  totemInput.addEventListener('change', e=>{ p.totem = e.target.value; saveData(); });
-  card.appendChild(totemInput);
-
-  if(isMe){
-    card.appendChild(els(`<span class="term-tag me">★ This is me</span>`));
-  } else {
-    card.appendChild(els(`<div class="field-label">Relationship (to you)</div>`));
-    if(rel){
-      const tagClass = rel.skew ? 'term-tag skew' : 'term-tag';
-      const tag = els(`<span class="${tagClass}">${rel.term}<span class="cat">${rel.cat}</span></span>`);
-      card.appendChild(tag);
-      const setMe = els(`<button class="mini-btn" style="margin-top:4px;">view from here instead</button>`);
-      setMe.addEventListener('click', ()=>{ meId = p.id; saveMyPrefs(); render(); });
-      card.appendChild(setMe);
-    } else {
-      const btn = els(`<button class="mini-btn">Set as me</button>`);
-      btn.addEventListener('click', ()=>{ meId = p.id; saveMyPrefs(); render(); });
-      card.appendChild(btn);
+/* Everybody above somebody, with how many generations up they sit, plus the
+   unions along the way — those are where two people's lines meet. */
+function ancestry(id){
+  const up = new Map([[id, 0]]);
+  const joins = [];                       // { union, child, up } — child is on this path
+  let frontier = [{ id, up:0 }];
+  const seen = new Set([id]);
+  let guard = 0;
+  while (frontier.length && guard++ < 200){
+    const next = [];
+    for (const f of frontier){
+      const u = parentUnionOf(f.id);
+      if (!u) continue;
+      joins.push({ union:u, child:f.id, up:f.up });
+      for (const par of u.partners){
+        if (!state.people[par] || seen.has(par)) continue;
+        seen.add(par);
+        up.set(par, f.up + 1);
+        next.push({ id:par, up:f.up + 1 });
+      }
     }
+    frontier = next;
   }
-
-  // birth-order arrows, only meaningful among siblings sharing a parent
-  const sibs = Object.values(people).filter(x => (x.fatherId===p.fatherId && p.fatherId) || (x.motherId===p.motherId && p.motherId));
-  if(sibs.length > 1){
-    const ob = els(`<div class="order-btns"></div>`);
-    const up = els(`<button title="Mark older">▲</button>`);
-    const down = els(`<button title="Mark younger">▼</button>`);
-    up.addEventListener('click', ()=>{ p.order -= 1.5; saveData(); render(); });
-    down.addEventListener('click', ()=>{ p.order += 1.5; saveData(); render(); });
-    ob.appendChild(up); ob.appendChild(down);
-    card.style.position='relative';
-    card.appendChild(ob);
-  }
-
-  if(p.addedBy){
-    card.appendChild(els(`<div class="addedby">added by ${escapeAttr(p.addedBy)}</div>`));
-  }
-
-  if(!p.fatherId && !p.motherId){
-    const ancWrap = els(`<div class="card-extra"></div>`);
-    const addAnc = els(`<button class="mini-btn sprout-btn">↑ Parents</button>`);
-    addAnc.addEventListener('click', ()=> showForm(ancWrap, 'ancestors', p.id));
-    ancWrap.appendChild(addAnc);
-    card.appendChild(ancWrap);
-  }
-
-  return card;
+  return { up, joins };
 }
 
-function actionRow(personA, personB){
-  const wrap = els(`<div class="mini-actions"></div>`);
-  const kidCount = childrenOf(personA.id, personB?personB.id:null).length;
+const SIB = (mine, theirs, older) => {
+  if (!mine || !theirs) return null;                 // need both to know which word
+  if (mine !== theirs) return 'Hanzvadzi';           // opposite sex needs no seniority
+  if (older === null) return null;                   // same sex, and nobody knows who is older
+  return older ? 'Mukoma' : "Munin'ina";
+};
 
-  const addChildBtn = els(`<button class="mini-btn ${kidCount===0?'sprout-btn':''}">↓ Child${kidCount===0?' ✦':''}</button>`);
-  addChildBtn.addEventListener('click', ()=> showForm(wrap, 'child', personA.id, personB?personB.id:null));
-  wrap.appendChild(addChildBtn);
-
-  if(!personB){
-    const addSpouseBtn = els(`<button class="mini-btn">⚭ Spouse</button>`);
-    addSpouseBtn.addEventListener('click', ()=> showForm(wrap, 'spouse', personA.id));
-    wrap.appendChild(addSpouseBtn);
-  }
-
-  return wrap;
+/* A birth year out of whatever was typed — "1968", "12 Mar 1968", "c.1930". */
+function birthYear(id){
+  const p = state.people[id];
+  const m = p && p.born && String(p.born).match(/\b(1[0-9]{3}|20[0-9]{2})\b/);
+  return m ? Number(m[1]) : null;
 }
 
-function showForm(anchorWrap, type, idA, idB){
-  const old = anchorWrap.parentElement.querySelector('.inline-form');
-  if(old) old.remove();
+/* Is `a` older than `b`, or null when there is no way to tell?
 
-  let form;
-  if(type==='child'){
-    form = els(`
-      <div class="inline-form">
-        <input type="text" placeholder="Child's name" class="cname">
-        <div class="row">
-          <select class="csex"><option value="M">Son</option><option value="F">Daughter</option></select>
-        </div>
-        <div class="actions"><button class="cancel">Cancel</button><button class="go">Add child</button></div>
-      </div>`);
-    form.querySelector('.cancel').addEventListener('click', ()=>form.remove());
-    form.querySelector('.go').addEventListener('click', ()=>{
-      const name = form.querySelector('.cname').value.trim() || 'New child';
-      const sex = form.querySelector('.csex').value;
-      const order = childrenOf(idA, idB).length;
-      const id = genId();
-      people[id] = {id, name, sex, totem:'', fatherId: sexParent(idA,idB,'M'), motherId: sexParent(idA,idB,'F'), spouseId:null, order, addedBy: myName};
-      saveData(); render();
-    });
-  } else if(type==='spouse'){
-    form = els(`
-      <div class="inline-form">
-        <input type="text" placeholder="Spouse's name" class="sname">
-        <div class="row">
-          <select class="ssex"><option value="F">Wife</option><option value="M">Husband</option></select>
-        </div>
-        <div class="actions"><button class="cancel">Cancel</button><button class="go">Add spouse</button></div>
-      </div>`);
-    form.querySelector('.cancel').addEventListener('click', ()=>form.remove());
-    form.querySelector('.go').addEventListener('click', ()=>{
-      const name = form.querySelector('.sname').value.trim() || 'New spouse';
-      const sex = form.querySelector('.ssex').value;
-      const id = genId();
-      people[id] = {id, name, sex, totem:'', fatherId:null, motherId:null, spouseId: idA, order:0, addedBy: myName};
-      people[idA].spouseId = id;
-      saveData(); render();
-    });
-  } else if(type==='ancestors'){
-    form = els(`
-      <div class="inline-form">
-        <input type="text" placeholder="Father's name" class="fname">
-        <input type="text" placeholder="Mother's name" class="mname">
-        <div class="actions"><button class="cancel">Cancel</button><button class="go">Add parents</button></div>
-      </div>`);
-    form.querySelector('.cancel').addEventListener('click', ()=>form.remove());
-    form.querySelector('.go').addEventListener('click', ()=>{
-      const fname = form.querySelector('.fname').value.trim() || 'Father';
-      const mname = form.querySelector('.mname').value.trim() || 'Mother';
-      const fid = genId(), mid = genId();
-      people[fid] = {id:fid, name:fname, sex:'M', totem:'', fatherId:null, motherId:null, spouseId:mid, order:0, addedBy: myName};
-      people[mid] = {id:mid, name:mname, sex:'F', totem:'', fatherId:null, motherId:null, spouseId:fid, order:0, addedBy: myName};
-      people[idA].fatherId = fid; people[idA].motherId = mid;
-      saveData(); render();
-    });
+   Brothers and sisters of one household are ranked by the row itself, which
+   is arranged by hand. Everyone else — the children of two brothers, say —
+   is ranked by their own birth dates, because that is how this family counts
+   seniority. No dates, no answer. */
+function olderThan(a, b){
+  const ua = parentUnionOf(a), ub = parentUnionOf(b);
+  if (ua && ub && ua.id === ub.id) return birthRank(a) < birthRank(b);
+  const ya = birthYear(a), yb = birthYear(b);
+  if (ya === null || yb === null) return null;
+  if (ya !== yb) return ya < yb;
+  const da = Date.parse(state.people[a].born), db = Date.parse(state.people[b].born);
+  if (!isNaN(da) && !isNaN(db) && da !== db) return da < db;
+  return null;                                       // same year, no finer detail
+}
+const possess = id => {
+  const p = state.people[id];
+  return p ? p.name : 'them';
+};
+
+/* The term for `tid` as seen by `who`, with the trace that produced it. */
+function relationship(who, tid, byBloodOnly){
+  if (!who || !tid || !state.people[who] || !state.people[tid]) return null;
+  if (who === tid) return { term:'You', why:'this is you' };
+
+  const me = state.people[who], them = state.people[tid];
+
+  // married to each other
+  if (partnersOf(who).includes(tid)){
+    return { term: them.sex === 'f' ? 'Mukadzi' : them.sex === 'm' ? 'Murume' : null,
+             why:'your husband or wife' };
   }
-  anchorWrap.parentElement.appendChild(form);
+
+  const mine = ancestry(who), theirs = ancestry(tid);
+
+  // straight up or straight down the same line
+  if (mine.up.has(tid)){
+    const n = mine.up.get(tid);
+    if (n === 1) return { term: them.sex === 'f' ? 'Amai' : them.sex === 'm' ? 'Baba' : null,
+                          why:'your mother or father' };
+    return { term: them.sex === 'f' ? 'Ambuya' : them.sex === 'm' ? 'Sekuru' : null,
+             why:n === 2 ? 'your grandparent' : `your ancestor, ${n} generations back` };
+  }
+  if (theirs.up.has(who)){
+    const n = theirs.up.get(who);
+    if (n === 1) return { term: them.sex === 'f' ? 'Mwanasikana' : them.sex === 'm' ? 'Mwanakomana' : null,
+                          why:'your child' };
+    return { term:'Muzukuru', why:n === 2 ? 'your grandchild' : `your descendant, ${n} generations down` };
+  }
+
+  // where the two lines meet: the nearest union both descend from
+  let best = null;
+  for (const a of mine.joins) for (const b of theirs.joins){
+    if (a.union.id !== b.union.id || a.child === b.child) continue;
+    const cost = a.up + b.up;
+    if (!best || cost < best.cost) best = { cost, myUp:a.up, tgUp:b.up, myLink:a.child, tgLink:b.child };
+  }
+
+  if (best){
+    const myLink = state.people[best.myLink], tgLink = state.people[best.tgLink];
+    const genDiff = best.myUp - best.tgUp;            // >0 means they are above me
+    const known = myLink.sex && tgLink.sex;
+    const cross = best.myUp >= 1 && known && myLink.sex !== tgLink.sex;
+    const senior = olderThan(best.tgLink, best.myLink);   // two siblings: always answerable
+    const via = best.myUp === 1
+      ? (myLink.sex === 'f' ? "your mother's" : myLink.sex === 'm' ? "your father's" : "your parent's")
+      : `your ancestor ${myLink.name}'s`;
+
+    if (cross){
+      // Tete's line and Sekuru's line, and the skew that runs down them
+      const motherBrother = myLink.sex === 'f' && tgLink.sex === 'm';
+      if (genDiff >= 2) return { term: them.sex === 'f' ? 'Ambuya' : 'Sekuru',
+                                 why:`${via} family, two generations above you` };
+      if (genDiff === 1) return motherBrother
+        ? { term:'Sekuru', why:`${via} brother` }
+        : { term:'Tete', why:`${via} sister` };
+      return motherBrother
+        ? { term:'Sekuru', why:`descended from ${via} brother — that line stays Sekuru` }
+        : { term:'Muzukuru', why:`descended from ${via} sister — that line stays Muzukuru` };
+    }
+
+    // parallel: the line folds back into your own
+    if (genDiff >= 2) return { term: them.sex === 'f' ? 'Ambuya' : them.sex === 'm' ? 'Sekuru' : null,
+                               why:'two generations above you' };
+    if (genDiff === 1){
+      if (them.sex === 'm') return { term: senior ? 'Babamukuru' : 'Babamunini',
+                                     why:`${via} ${senior ? 'older' : 'younger'} brother` };
+      if (them.sex === 'f') return { term: senior ? 'Amaiguru' : 'Amainini',
+                                     why:`${via} ${senior ? 'older' : 'younger'} sister` };
+      return { term:null, why:`${via} sibling` };
+    }
+    if (genDiff === 0){
+      const sameParents = best.myUp === 0 && best.tgUp === 0;
+      const older = olderThan(tid, who);
+      const t = SIB(me.sex, them.sex, older);
+      if (sameParents){
+        return { term:t, why:`your ${older ? 'older' : 'younger'} brother or sister` };
+      }
+      const base = `${via} side — a brother or sister to you, not a cousin`;
+      const needsAge = !t && me.sex && them.sex && me.sex === them.sex;
+      // Naming both candidates is more use than saying nothing: it shows the
+      // word is one of two and that a birth year is all that's missing.
+      return needsAge
+        ? { term:null, choice:"Mukoma or Munin'ina",
+            why:`${base} — add both birth years to say which` }
+        : { term:t, why:base };
+    }
+    return { term:'Muzukuru', why:`${via} side, ${-genDiff} generation${genDiff === -1 ? '' : 's'} below you` };
+  }
+
+  // no blood link — try the marriages, but only one hop, or two people
+  // married to each other would send this bouncing back and forth forever
+  if (!byBloodOnly){
+    const spouseTerm = marriedIn(who, tid);
+    if (spouseTerm) return spouseTerm;
+  }
+  return { term:null, why:'no traced link yet — add the people in between' };
 }
 
-function sexParent(idA, idB, sex){
-  if(people[idA] && people[idA].sex===sex) return idA;
-  if(idB && people[idB] && people[idB].sex===sex) return idB;
+/* Relatives by marriage. Only the terms the family already uses are named;
+   anything else is described rather than invented. */
+function marriedIn(who, tid){
+  const them = state.people[tid];
+
+  // through your own husband or wife
+  for (const sp of partnersOf(who)){
+    const r = relationship(sp, tid, true);
+    if (!r || !r.term) continue;
+    const spouse = state.people[sp];
+    if (spouse.sex === 'f' && r.why && r.why.includes('brother or sister')){
+      if (them.sex === 'm') return { term:'Tsano', why:"your wife's brother" };
+      if (them.sex === 'f') return { term:'Muramu', why:"your wife's sister" };
+    }
+    return { term:null, why:`married into the family — ${spouse.name}'s ${r.term}` };
+  }
+
+  // married to one of yours
+  for (const sp of partnersOf(tid)){
+    const r = relationship(who, sp, true);
+    if (!r) continue;
+    if (r.why === 'your child'){
+      if (them.sex === 'f') return { term:'Muroora', why:"your son's or daughter's wife" };
+      if (them.sex === 'm') return { term:'Mukuwasha', why:"your daughter's or son's husband" };
+    }
+    if (r.term) return { term:null, why:`married to your ${r.term} (${possess(sp)})` };
+  }
   return null;
 }
 
-function escapeAttr(s){ return String(s).replace(/"/g,'&quot;'); }
-
-let pendingConnectors = [];
-
-function renderUnit(personId){
-  const p = people[personId];
-  const spouse = p.spouseId ? people[p.spouseId] : null;
-  const node = els(`<div class="node"></div>`);
-  const unit = els(`<div class="unit"></div>`);
-  const coupleRow = els(`<div class="couple-row"></div>`);
-  coupleRow.appendChild(personCard(p));
-  if(spouse){
-    coupleRow.appendChild(els(`<span class="knot">⚭</span>`));
-    coupleRow.appendChild(personCard(spouse));
+/* Attach somebody already in the tree instead of typing them again. This is
+   what actually stops duplicates: the moment two branches meet, one of them
+   points at the person the other already entered. */
+function canLink(kind, anchorId, otherId){
+  if (anchorId === otherId) return 'that is the same person';
+  const up = ancestry(anchorId).up, down = ancestry(otherId).up;
+  if (kind === 'parent'){
+    if (down.has(anchorId)) return 'that would make them their own ancestor';
+    const pu = parentUnionOf(anchorId);
+    if (pu && pu.partners.includes(otherId)) return 'already recorded as a parent here';
+    if (pu && pu.partners.length >= 2) return 'both parents are already named';
   }
-  unit.appendChild(coupleRow);
-  unit.appendChild(actionRow(p, spouse));
-
-  const kids = childrenOf(p.id, spouse?spouse.id:null);
-  if(kids.length){
-    const isFolded = collapsed.has(p.id);
-    const foldBtn = els(`<button class="mini-btn fold-btn">${isFolded ? '▸ '+countDescendants(p.id)+' more' : '▾ fold branch'}</button>`);
-    foldBtn.addEventListener('click', ()=>{
-      if(isFolded) collapsed.delete(p.id); else collapsed.add(p.id);
-      saveMyPrefs(); render();
-    });
-    unit.appendChild(foldBtn);
+  if (kind === 'child'){
+    if (up.has(otherId)) return 'that would make them their own descendant';
+    const pu = parentUnionOf(otherId);
+    if (pu) return `${state.people[otherId].name} already has parents recorded — merge the two records instead`;
   }
-  node.appendChild(unit);
-
-  if(kids.length && !collapsed.has(p.id)){
-    const childrenRow = els(`<div class="children-row"></div>`);
-    const childUnitEls = [];
-    kids.forEach(k => {
-      const slot = els(`<div class="child-slot"></div>`);
-      const kidNode = renderUnit(k.id);
-      slot.appendChild(kidNode);
-      childrenRow.appendChild(slot);
-      childUnitEls.push(kidNode.firstElementChild); // that child's own .unit, always appended first
-    });
-    node.appendChild(childrenRow);
-    pendingConnectors.push({parent: unit, children: childUnitEls});
+  if (kind === 'sibling'){
+    const pu = parentUnionOf(otherId);
+    const mine = parentUnionOf(anchorId);
+    if (pu && mine && pu.id !== mine.id) return `${state.people[otherId].name} already has different parents recorded`;
+    if (up.has(otherId) || down.has(anchorId)) return 'they are already an ancestor or descendant here';
   }
-  return node;
+  if (kind === 'partner'){
+    if (partnersOf(anchorId).includes(otherId)) return 'already married to each other';
+    if (up.has(otherId) || down.has(anchorId)) return 'they are already an ancestor or descendant here';
+  }
+  return null;
 }
 
-function drawConnectors(list){
-  const forestEl = document.getElementById('forest');
-  if(!forestEl) return;
-  const old = document.getElementById('connectorSvg');
-  if(old) old.remove();
-  if(!list.length) return;
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.id = 'connectorSvg';
-  svg.style.position = 'absolute';
-  svg.style.left = '0'; svg.style.top = '0';
-  svg.style.pointerEvents = 'none';
-  svg.style.zIndex = '0';
-  const width = Math.max(forestEl.scrollWidth, forestEl.clientWidth, 1);
-  const height = Math.max(forestEl.scrollHeight, forestEl.clientHeight, 1);
-  svg.setAttribute('width', width);
-  svg.setAttribute('height', height);
-  forestEl.style.position = 'relative';
-  forestEl.insertBefore(svg, forestEl.firstChild);
-
-  const fRect = forestEl.getBoundingClientRect();
-  const toLocal = (rect) => ({
-    cx: rect.left + rect.width/2 - fRect.left + forestEl.scrollLeft,
-    cy: rect.top + rect.height/2 - fRect.top + forestEl.scrollTop,
-    top: rect.top - fRect.top + forestEl.scrollTop,
-    bottom: rect.bottom - fRect.top + forestEl.scrollTop,
-    left: rect.left - fRect.left + forestEl.scrollLeft,
-    right: rect.right - fRect.left + forestEl.scrollLeft
-  });
-  const line = (x1,y1,x2,y2) => {
-    const el = document.createElementNS(svgNS,'line');
-    el.setAttribute('x1',x1); el.setAttribute('y1',y1);
-    el.setAttribute('x2',x2); el.setAttribute('y2',y2);
-    svg.appendChild(el);
-  };
-  const stemLen = 16;
-
-  list.forEach(({parent, children}) => {
-    if(!parent || !children || !children.length) return;
-    const p = toLocal(parent.getBoundingClientRect());
-    const kids = children.filter(Boolean).map(c => toLocal(c.getBoundingClientRect()));
-    if(!kids.length) return;
-
-    if(orientation === 'right'){
-      const midX = p.right + stemLen;
-      line(p.right, p.cy, midX, p.cy);
-      const minY = Math.min(p.cy, ...kids.map(k=>k.cy));
-      const maxY = Math.max(p.cy, ...kids.map(k=>k.cy));
-      line(midX, minY, midX, maxY);
-      kids.forEach(k => line(midX, k.cy, k.left, k.cy));
-    } else {
-      const midY = p.bottom + stemLen;
-      line(p.cx, p.bottom, p.cx, midY);
-      const minX = Math.min(p.cx, ...kids.map(k=>k.cx));
-      const maxX = Math.max(p.cx, ...kids.map(k=>k.cx));
-      line(minX, midY, maxX, midY);
-      kids.forEach(k => line(k.cx, midY, k.cx, k.top));
+function linkExisting(kind, anchorId, otherId){
+  snapshot();
+  if (kind === 'parent'){
+    const pu = parentUnionOf(anchorId);
+    if (pu) pu.partners.push(otherId); else addUnion([otherId], [anchorId]);
+  } else if (kind === 'sibling'){
+    const pu = parentUnionOf(anchorId) || addUnion([], [anchorId]);
+    if (!pu.children.includes(otherId)){
+      const at = pu.children.indexOf(anchorId);
+      pu.children.splice(at + 1, 0, otherId);
     }
-  });
+  } else if (kind === 'partner'){
+    const solo = unionsOf(anchorId).find(u => u.partners.length === 1);
+    if (solo) solo.partners.push(otherId); else addUnion([anchorId, otherId], []);
+  } else if (kind === 'child'){
+    const u = unionsOf(anchorId)[0] || addUnion([anchorId], []);
+    if (!u.children.includes(otherId)) u.children.push(otherId);
+  }
 }
 
-function populateEgoSelect(){
-  const sel = document.getElementById('egoSelect');
-  const prev = sel.value;
-  sel.innerHTML = '<option value="">— choose "you" —</option>';
-  Object.values(people)
-    .sort((a,b)=>a.name.localeCompare(b.name))
-    .forEach(p=>{
-      const opt = els(`<option value="${p.id}">${p.name || '(unnamed)'}</option>`);
-      sel.appendChild(opt);
+/* Fold `loser` into `keeper`: every marriage, every child list, and any
+   detail the kept record was missing. */
+function mergePeople(keeperId, loserId){
+  const keeper = state.people[keeperId], loser = state.people[loserId];
+  if (!keeper || !loser || keeperId === loserId) return;
+  snapshot();
+
+  for (const f of ['sex', 'totem', 'born', 'died']){
+    if (!keeper[f] && loser[f]) keeper[f] = loser[f];
+  }
+  if (loser.root) keeper.root = true;
+  if (loser.name.length > keeper.name.length) keeper.name = loser.name;
+
+  const keeperParents = parentUnionOf(keeperId);
+  for (const u of unions()){
+    u.partners = [...new Set(u.partners.map(x => x === loserId ? keeperId : x))];
+    if (u.children.includes(loserId)){
+      // one person has one set of parents; the kept record's win
+      if (keeperParents && u.id !== keeperParents.id) u.children = u.children.filter(c => c !== loserId);
+      else u.children = [...new Set(u.children.map(c => c === loserId ? keeperId : c))];
+    }
+  }
+  delete state.people[loserId];
+  for (const u of unions()){
+    const dead = !u.partners.length && u.children.length < 2;
+    if (dead) delete state.unions[u.id];
+  }
+  if (state.rootId === loserId) state.rootId = keeperId;
+  if (meId === loserId) setMe(keeperId);
+  state.notDuplicates = (state.notDuplicates || []).filter(k => !k.includes(loserId));
+}
+
+function dismissDuplicate(a, b){
+  snapshot();
+  state.notDuplicates = state.notDuplicates || [];
+  const k = dismissedKey(a, b);
+  if (!state.notDuplicates.includes(k)) state.notDuplicates.push(k);
+}
+
+/* ── generations ────────────────────────────────────────────────────── */
+function generations(){
+  const g = {};
+  if (!state.rootId || !state.people[state.rootId]) return g;
+  const q = [state.rootId]; g[state.rootId] = 0;
+  const step = (other, gen) => {
+    if (other && state.people[other] && g[other] === undefined){ g[other] = gen; q.push(other); }
+  };
+  while (q.length){
+    const id = q.shift(), n = g[id];
+    const pu = parentUnionOf(id);
+    if (pu){
+      pu.partners.forEach(p => step(p, n - 1));
+      pu.children.forEach(c => step(c, n));
+    }
+    for (const u of unions()){
+      if (!u.partners.includes(id)) continue;
+      u.partners.forEach(p => step(p, n));
+      u.children.forEach(c => step(c, n + 1));
+    }
+  }
+  people().forEach(p => { if (g[p.id] === undefined) g[p.id] = 0; });
+  return g;
+}
+
+/* ── layout ─────────────────────────────────────────────────────────────
+   Blocks are what moves. A block is a row of people joined by marriage —
+   usually a couple, but somebody who married more than once sits in the
+   middle of their partners, so one row can read  Chipo — Tendai — Rudo.
+   Each marriage in the row has its own point on the ground, and its own
+   children hang from it, eldest on the left.
+
+   Every block hangs off at most one parent block, so the family is still a
+   forest and one tidy-tree pass places it. */
+function computeLayout(){
+  const g = generations();
+  const blocks = [], ofPerson = {};
+  const width = b => b.socket ? 112 : b.members.length * POD_W + (b.members.length - 1) * COUPLE_GAP;
+
+  // Walk the marriage graph so everybody who married into a row stands in it.
+  const adj = {};
+  for (const u of unions()){
+    if (u.partners.length !== 2) continue;
+    const [x, y] = u.partners;
+    if (!state.people[x] || !state.people[y]) continue;
+    (adj[x] = adj[x] || []).push(y);
+    (adj[y] = adj[y] || []).push(x);
+  }
+  const seen = new Set();
+  const chainFrom = start => {                  // depth-first, so A–X–B–C reads in order
+    const order = [], stack = [start];
+    while (stack.length){
+      const n = stack.pop();
+      if (seen.has(n)) continue;
+      seen.add(n); order.push(n);
+      (adj[n] || []).slice().reverse().forEach(m => { if (!seen.has(m)) stack.push(m); });
+    }
+    return order;
+  };
+
+  for (const p of people()){
+    if (seen.has(p.id)) continue;
+    // start at an end of the row when there is one, so nobody is stranded
+    const ends = (adj[p.id] || []).length === 1 ? p.id
+      : ((adj[p.id] || []).find(m => (adj[m] || []).length === 1) || p.id);
+    const members = chainFrom(ends);
+    const b = { id:'b' + blocks.length, members, gen:g[members[0]] ?? 0, x:0, kids:[], parent:null, unions:[] };
+    members.forEach(m => ofPerson[m] = b);
+    blocks.push(b);
+  }
+
+  // Which marriages belong to which row, in the order they sit along it.
+  for (const b of blocks){
+    b.unions = unions()
+      .filter(u => u.partners.length && u.partners.every(pp => b.members.includes(pp)))
+      .sort((u1, u2) => Math.min(...u1.partners.map(x => b.members.indexOf(x))) -
+                        Math.min(...u2.partners.map(x => b.members.indexOf(x))));
+  }
+
+  for (const b of blocks){
+    for (const u of b.unions){
+      for (const c of u.children){            // union.children is already eldest-first
+        const cb = ofPerson[c];
+        if (!cb || cb === b || cb.parent) continue;
+        cb.parent = b; cb.viaChild = c; cb.viaUnion = u.id;
+        b.kids.push(cb);
+      }
+    }
+  }
+  // Siblings whose parents nobody has named yet: stand an empty socket in
+  // their place so they hang together and the gap is visible.
+  for (const u of unions()){
+    if (u.partners.length) continue;
+    const kids = u.children.map(c => ofPerson[c]).filter(Boolean).filter(k => !k.parent);
+    if (!kids.length) continue;
+    const host = { id:'s' + u.id, socket:true, forChild:u.children[0], members:[],
+                   gen:(g[u.children[0]] ?? 0) - 1, x:0, kids:[], parent:null, unions:[] };
+    blocks.push(host);
+    for (const kb of kids){ kb.parent = host; kb.viaChild = u.children.find(c => kb.members.includes(c)); host.kids.push(kb); }
+  }
+
+  function place(b, left){
+    if (!b.kids.length){ b.x = left + width(b)/2; return width(b); }
+    let cursor = left, span = 0;
+    b.kids.forEach((k, i) => {
+      const w = place(k, cursor);
+      cursor += w + SIB_GAP;
+      span += w + (i ? SIB_GAP : 0);
     });
-  sel.value = meId || '';
+    b.x = (b.kids[0].x + b.kids[b.kids.length - 1].x) / 2;
+    const own = width(b);
+    if (own > span){
+      const shift = (own - span) / 2;
+      const move = (n, d) => { n.x += d; n.kids.forEach(k => move(k, d)); };
+      b.kids.forEach(k => move(k, shift));
+      b.x = left + own/2;
+      return own;
+    }
+    return span;
+  }
+
+  let cursor = 0;
+  for (const b of blocks){
+    if (b.parent) continue;
+    cursor += place(b, cursor) + SIB_GAP * 2;
+  }
+
+  const persons = {}, sockets = [], links = [], unionAt = {};
+  const countBelow = b => b.members.length + b.kids.reduce((n, k) => n + countBelow(k), 0);
+
+  for (const b of blocks){
+    b.y = -b.gen * LEVEL;
+    if (b.socket){ sockets.push(b); continue; }
+    b.members.forEach((m, i) => {
+      persons[m] = { x:b.x - width(b)/2 + i*(POD_W + COUPLE_GAP) + POD_W/2, y:b.y };
+    });
+    for (const u of b.unions){
+      const xs = u.partners.map(pp => persons[pp].x);
+      const gap = u.partners.length === 2
+        ? Math.abs(b.members.indexOf(u.partners[0]) - b.members.indexOf(u.partners[1])) : 1;
+      // Children normally rise from halfway between their parents. When a
+      // marriage reaches past somebody standing in between, that halfway point
+      // lands on a stranger's pod — so hang them off the far partner instead,
+      // where the tie arc still shows who the other parent is.
+      const far = u.partners.slice().sort((x, y) => b.members.indexOf(y) - b.members.indexOf(x))[0];
+      unionAt[u.id] = {
+        x: gap > 1 ? persons[far].x : xs.reduce((t, v) => t + v, 0) / xs.length,
+        y: b.y
+      };
+      if (u.partners.length === 2){
+        links.push({ kind:'bond', x1:Math.min(...xs), x2:Math.max(...xs), y:b.y, reach:gap > 1 });
+      }
+    }
+  }
+  for (const b of blocks){
+    if (!b.parent) continue;
+    const to = persons[b.viaChild];
+    if (!to) continue;
+    const from = (b.viaUnion && unionAt[b.viaUnion]) || { x:b.parent.x, y:b.parent.y };
+    links.push({
+      kind:'branch', x1:from.x, y1:from.y, x2:to.x, y2:to.y,
+      weight:countBelow(b), root:(from.y + to.y)/2 > 0,
+      unknown:!!b.parent.socket, id:b.viaChild
+    });
+  }
+  layout = { persons, sockets, links };
+}
+
+/* ── drawing ────────────────────────────────────────────────────────── */
+function branchPath(l){
+  const dy = l.y2 - l.y1, dx = l.x2 - l.x1;
+  const c = Math.abs(dy) * 0.45, s = Math.sign(dy) || 1;
+  // leaves the parent going straight and arrives at the child going straight,
+  // which gives a fork the spring of a real branch instead of a wire.
+  return `M${l.x1} ${l.y1} C ${l.x1 + dx*0.05} ${l.y1 + s*c}, ${l.x2 - dx*0.05} ${l.y2 - s*c}, ${l.x2} ${l.y2}`;
 }
 
 function render(){
-  const nameField = document.getElementById('contributorName');
-  if(document.activeElement !== nameField) nameField.value = myName || '';
-  const orientBtn = document.getElementById('orientBtn');
-  orientBtn.textContent = orientation === 'down' ? '⇅ Top-down' : '⇄ Left-right';
-  populateEgoSelect();
-  const forest = document.getElementById('forest');
-  forest.classList.toggle('ltr', orientation === 'right');
-  forest.innerHTML = '';
-  pendingConnectors = [];
-  const roots = getRootIds();
-  roots.forEach(rid=>{
-    forest.appendChild(renderUnit(rid));
+  computeLayout();
+
+  const svg = [];
+  for (const l of layout.links){
+    if (l.kind === 'bond'){
+      // Two partners standing next to each other get a short straight tie.
+      // A second or third marriage reaches past whoever stands between them,
+      // so that tie dips below the row instead of cutting through a pod.
+      const d = l.reach
+        ? `M${l.x1} ${l.y}q${(l.x2 - l.x1)/2} ${POD_H/2 + 26} ${l.x2 - l.x1} 0`
+        : `M${l.x1} ${l.y}L${l.x2} ${l.y}`;
+      svg.push(`<path class="bond${l.reach ? ' reach' : ''}" d="${d}"></path>`);
+      continue;
+    }
+    if (l.unknown){
+      svg.push(`<path class="branch unknown" d="${branchPath(l)}"></path>`);
+      continue;
+    }
+    // A baobab is fattest where it meets the ground, then tapers fast. Swelling
+    // the strokes near the horizon is what gives the whole thing its shape.
+    const flare = 1 + 0.55 * Math.exp(-Math.abs((l.y1 + l.y2) / 2) / 150);
+    const w = (l.root
+      ? Math.max(2.5, Math.min(15, 2.5 + Math.sqrt(l.weight) * 1.9))
+      : Math.max(3.5, Math.min(38, 3.5 + Math.sqrt(l.weight) * 3.8))) * flare;
+    svg.push(`<path class="branch${l.root ? ' root' : ''}${fresh.has(l.id) ? ' grow' : ''}"` +
+             ` stroke-width="${w.toFixed(1)}" d="${branchPath(l)}"></path>`);
+  }
+  gtree.innerHTML = svg.join('');
+
+  const html = [];
+  for (const s of layout.sockets){
+    html.push(`<div class="pod socket" data-socket="${s.forChild}" tabindex="0" role="button"` +
+              ` aria-label="Add the parents of these siblings"` +
+              ` style="left:${s.x}px; top:${s.y}px"><span class="nm">+ Parents</span></div>`);
+  }
+  for (const p of people()){
+    const at = layout.persons[p.id];
+    if (!at) continue;
+    const mark = p.sex === 'f' ? '♀' : p.sex === 'm' ? '♂' : '';
+    const rank = rankLabel(p.id);
+    const life = p.born || p.died ? (p.died ? `${p.born || '?'} – ${p.died}` : `b. ${p.born}`) : '';
+    const badge = meId === p.id ? '<span class="badge">You</span>'
+                : p.root ? '<span class="badge">Root of the line</span>' : '';
+    html.push(
+      `<div class="pod${sel === p.id ? ' sel' : ''}${fresh.has(p.id) ? ' sprout' : ''}` +
+      `${p.root ? ' taproot' : ''}${meId === p.id ? ' you' : ''}"` +
+      ` data-id="${p.id}" tabindex="0" role="button"` +
+      ` aria-label="${esc(p.name)} — show where the tree can grow from here"` +
+      ` style="left:${at.x}px; top:${at.y}px">` +
+      badge +
+      (mark ? `<span class="mk">${mark}</span>` : '') +
+      `<span class="nm">${esc(p.name)}</span>` +
+      (life ? `<span class="dates">${esc(life)}</span>` : '') +
+      (p.totem ? `<span class="tot">${esc(p.totem)}</span>` : '') +
+      (rank ? `<span class="rank">${rank}</span>` : '') +
+      (sel === p.id ? ordControls(p.id) : '') +
+      (sel === p.id ? `<span class="rm" data-card="${p.id}" role="button" tabindex="0"` +
+        ` aria-label="Details for ${esc(p.name)}" style="left:-9px;right:auto;">⋯</span>` : '') +
+      (sel === p.id ? `<span class="rm" data-rm="${p.id}" role="button" tabindex="0" aria-label="Remove ${esc(p.name)}">✕</span>` : '') +
+      `</div>`);
+  }
+  podsEl.innerHTML = html.join('');
+
+  $('count').textContent = people().length;
+  updateWho();
+  const likely = likelyDuplicates();
+  const chip = $('dupes');
+  chip.hidden = !likely.length;
+  chip.textContent = likely.length === 1 ? '1 possible duplicate' : `${likely.length} possible duplicates`;
+  $('bar').hidden = !people().length;
+  $('hint').hidden = people().length === 0 || people().length > 4;
+  $('seed').hidden = !!people().length;
+  fresh.clear();
+  applyTransform();
+}
+
+/* Eldest, then 2nd, 3rd… Only worth saying once there is more than one of
+   them; a single child has no birth order to speak of. */
+function rankLabel(id, always){
+  const n = sibCount(id), i = birthRank(id);
+  if (n < 2 || i < 0) return '';
+  if (i === 0) return 'Eldest';
+  if (i === n - 1) return 'Youngest';
+  if (!always && sel !== id) return '';          // middles stay quiet until tapped
+  return ['', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th'][i] || (i + 1) + 'th';
+}
+
+function ordControls(id){
+  const n = sibCount(id), i = birthRank(id);
+  if (n < 2 || i < 0) return '';
+  const btn = (dir, cls, glyph, label) =>
+    `<span class="ord ${cls}" data-ord="${dir}" data-who="${id}" role="button"` +
+    ` tabindex="0" aria-label="Move ${esc(state.people[id].name)} ${label}">${glyph}</span>`;
+  return (i > 0     ? btn(-1, 'older', '‹', 'one place older') : '') +
+         (i < n - 1 ? btn(1, 'younger', '›', 'one place younger') : '');
+}
+
+/* Where the tree can grow from whoever is selected.
+
+   Buds are drawn in screen space at a fixed distance from the person, so they
+   stay the same size and reach whatever the zoom. Each one takes the first
+   spot on its preferred side that is on screen and lands on nobody — and then
+   claims it, so the next bud has to find its own. That last part matters: two
+   buds that pick the same spot look like one missing option. */
+function placeBuds(){
+  const layer = $('buds');
+  if (!layer) return;
+  if (!sel || !layout.persons[sel]){ layer.innerHTML = ''; budSig = ''; return; }
+
+  const id = sel, at = layout.persons[id];
+  const sx = q => q.x * pos.k + pos.x, sy = q => q.y * pos.k + pos.y;
+  const cx = sx(at), cy = sy(at);
+
+  const halfW = (POD_W / 2) * pos.k, halfH = (POD_H / 2) * pos.k;
+  // Covering a person is bad; covering another bud is fatal, because the
+  // hidden one looks like an option that simply isn't offered.
+  const pods = Object.values(layout.persons).map(q => ({
+    l:sx(q) - halfW - 6, r:sx(q) + halfW + 6,
+    t:sy(q) - halfH - 14, b:sy(q) + halfH + 14
+  })).concat((layout.sockets || []).map(q => ({
+    l:sx(q) - 58 * pos.k, r:sx(q) + 58 * pos.k,
+    t:sy(q) - 22 * pos.k, b:sy(q) + 22 * pos.k
+  })));
+  const placed = [];
+
+  const RX = halfW + 96, RY = halfH + 60;
+  const BW = 84, BH = 20;                     // half-extents of a bud
+  const PAD = 10, BAR = innerHeight - 70;     // stay on screen, clear of the toolbar
+  const boxOf = (x, y) => ({ l:x - BW, r:x + BW, t:y - BH, b:y + BH });
+  const onScreen = (x, y) =>
+    x - BW >= PAD && x + BW <= innerWidth - PAD && y - BH >= PAD && y + BH <= BAR;
+  const overlaps = (k, list) => list.some(q => k.l < q.r && q.l < k.r && k.t < q.b && q.t < k.b);
+  const RING = [0, -40, 40, -75, 75, -110, 110, -145, 145, 180, -90, 90];
+
+  const place = pref => {
+    const angles = pref.concat(RING.filter(a => !pref.includes(a)));
+    let fallback = null, fewest = Infinity;
+    for (const grow of [1, 1.3, 1.6, 2]){
+      for (const a of angles){
+        const r = a * Math.PI / 180;
+        const x = cx + Math.cos(r) * RX * grow, y = cy + Math.sin(r) * RY * grow;
+        if (!onScreen(x, y)) continue;
+        const k = boxOf(x, y);
+        if (overlaps(k, placed)) continue;              // never sit on another bud
+        const n = pods.filter(q => k.l < q.r && q.l < k.r && k.t < q.b && q.t < k.b).length;
+        if (n === 0){ placed.push(k); return [x, y]; }
+        if (n < fewest){ fewest = n; fallback = [x, y]; }
+      }
+    }
+    // Nothing on the ring was completely clear. Sitting over a name is
+    // survivable — the bud is drawn above the tree and still takes the tap.
+    // Sitting over another bud is not, so if the ring failed entirely, sweep
+    // the screen for the nearest free spot rather than stacking.
+    const spot = fallback || sweep();
+    placed.push(boxOf(spot[0], spot[1]));
+    return spot;
+  };
+
+  // Nearest point on a coarse grid that no other bud has taken.
+  const sweep = () => {
+    let best = null, nearest = Infinity;
+    for (let y = PAD + BH; y <= BAR - BH; y += 34){
+      for (let x = PAD + BW; x <= innerWidth - PAD - BW; x += 44){
+        if (overlaps(boxOf(x, y), placed)) continue;
+        const d = (x - cx) ** 2 + (y - cy) ** 2;
+        if (d < nearest){ nearest = d; best = [x, y]; }
+      }
+    }
+    return best || [Math.min(Math.max(cx, PAD + BW), innerWidth - PAD - BW),
+                    Math.min(Math.max(cy - RY, PAD + BH), BAR - BH)];
+  };
+
+  const ribbon = ribbonSpot(cx, cy);
+  if (ribbon) placed.push({ l:ribbon[0] - 134, r:ribbon[0] + 134, t:ribbon[1] - 48, b:ribbon[1] + 48 });
+
+  const pu = parentUnionOf(id);
+  const isRoot = !!(state.people[id] && state.people[id].root);
+  const canParent = !isRoot && (!pu || pu.partners.length < 2);
+  const mates = partnersOf(id).map(m => layout.persons[m]).filter(Boolean);
+  // stand the sibling bud on whichever side isn't already crowded by a spouse
+  const leftBusy = mates.some(q => q.x < at.x), rightBusy = mates.some(q => q.x > at.x);
+  const sibFirst = leftBusy && !rightBusy ? [0, -40, 40, 180] : [180, -140, 140, 0];
+  const parFirst = leftBusy && !rightBusy ? [180, -140, 140, 0] : [0, -40, 40, 180];
+
+  const out = [
+    { kind:'child',   label:'Child',   icon:'↑', at:place([-90, -60, -120, -35, -145]) },
+    { kind:'sibling', label:'Sibling', icon:'↔', at:place(sibFirst) },
+    { kind:'partner', label:mates.length ? 'Another partner' : 'Partner', icon:'⚭', at:place(parFirst) }
+  ];
+  if (canParent) out.push({ kind:'parent', icon:'↓',
+    label:pu && pu.partners.length ? 'Other parent' : 'Parent', at:place([90, 60, 120, 35, 145]) });
+
+  // Panning re-runs this on every frame. Rebuilding the markup each time would
+  // restart the pop-in animation and make the buds flicker, so once the same
+  // set is on screen we only move them.
+  const sig = id + '|' + out.map(o => o.kind + o.label).join(',') + '|' + (meId || '');
+  if (sig === budSig && layer.children.length >= out.length){
+    out.forEach((o, i) => {
+      layer.children[i].style.left = o.at[0].toFixed(1) + 'px';
+      layer.children[i].style.top  = o.at[1].toFixed(1) + 'px';
+    });
+    const el = layer.querySelector('.term');
+    if (el && ribbon){
+      el.style.left = ribbon[0].toFixed(1) + 'px';
+      el.style.top  = ribbon[1].toFixed(1) + 'px';
+    }
+    return;
+  }
+  budSig = sig;
+  layer.innerHTML = out.map(o =>
+    `<div class="bud" data-bud="${o.kind}" data-anchor="${id}" tabindex="0" role="button"` +
+    ` style="left:${o.at[0].toFixed(1)}px; top:${o.at[1].toFixed(1)}px">` +
+    `<i>${o.icon}</i>${o.label}</div>`).join('') + relationRibbon(ribbon);
+}
+
+/* Where the ribbon sits, or null when there is nothing to say — just below
+   the person, pulled inside the edges of the screen. */
+function ribbonSpot(cx, cy){
+  if (!meId || !sel || sel === meId || !state.people[meId] || !state.people[sel]) return null;
+  return [
+    Math.min(Math.max(cx, 132), innerWidth - 132),
+    Math.min(cy + (POD_H / 2) * pos.k + 52, innerHeight - 96)
+  ];
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+function applyTransform(){
+  gtree.setAttribute('transform', `translate(${pos.x},${pos.y}) scale(${pos.k})`);
+  podsEl.style.transform = `translate(${pos.x}px, ${pos.y}px) scale(${pos.k})`;
+  $('ground').style.top = pos.y + 'px';
+  $('ground').style.height = Math.max(0, innerHeight - pos.y) + 'px';
+  $('groundline').style.top = pos.y + 'px';
+  placeBuds();
+  if (pending && $('form')) placeForm($('form'));
+}
+
+/* The review panel: every pair the tree thinks might be one person, with
+   the evidence, and two ways out — keep one, or say they really are two. */
+function openDuplicates(){
+  closeForm();
+  const pairs = duplicatePairs();
+  const strongCount = pairs.filter(d => d.strong || d.score >= 0.75).length;
+  pending = { kind:'dupes', anchorId:sel || state.rootId };
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML =
+    `<p class="cap">Possibly the same person</p>` +
+    (pairs.length ? pairs.map((d, i) => {
+      const a = state.people[d.a], b = state.people[d.b];
+      const line = q => `${q.born ? esc(q.born) + (q.died ? ' – ' + esc(q.died) : '') + ' · ' : ''}` +
+        `${esc(positionOf(q.id))}`;
+      const strong = d.strong || d.score >= 0.75;
+      return `<div class="pair${strong ? '' : ' weak'}" data-i="${i}">` +
+        `<p class="keepnote">${strong ? 'Very likely one person' : 'Same name — probably two people'}` +
+        `<span>Keep which record?</span></p>` +
+        `<div class="two">` +
+          `<button type="button" data-keep="${d.a}" data-drop="${d.b}">${esc(a.name)}<small>${line(a)}</small></button>` +
+          `<button type="button" data-keep="${d.b}" data-drop="${d.a}">${esc(b.name)}<small>${line(b)}</small></button>` +
+        `</div>` +
+        `<p>${esc(d.why.join(' · '))}</p>` +
+        (d.against.length ? `<p class="against">Against: ${esc(d.against.join(' · '))}</p>` : '') +
+        `<button type="button" class="btn ghost wide" data-not="${d.a}|${d.b}">They are two different people</button>` +
+      `</div>`;
+    }).join('')
+      : `<p class="warn">Nothing looks doubled at the moment. A shared name is not ` +
+        `enough on its own — children are named after their grandparents all the ` +
+        `time. What counts is the shape of the family around them: the same ` +
+        `husband or wife, the same children, the same parents.</p>`) +
+    `<div class="row"><button class="btn" id="dNo">Done</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  el.querySelectorAll('[data-keep]').forEach(btn => btn.onclick = () => {
+    const keep = btn.dataset.keep, drop = btn.dataset.drop;
+    const gone = state.people[drop].name, kept = state.people[keep].name;
+    mergePeople(keep, drop);
+    closeForm(); render(); save();
+    say(`${gone} folded into ${kept}. One record now.`);
+    if (duplicatePairs().length) openDuplicates();
   });
-  requestAnimationFrame(()=> drawConnectors(pendingConnectors));
+  el.querySelectorAll('[data-not]').forEach(btn => btn.onclick = () => {
+    const [a, b] = btn.dataset.not.split('|');
+    dismissDuplicate(a, b);
+    closeForm(); render(); save();
+    if (duplicatePairs().length) openDuplicates();
+  });
+  $('dNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
-let resizeTimer = null;
-window.addEventListener('resize', ()=>{
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(()=> drawConnectors(pendingConnectors), 150);
-});
-if(document.fonts && document.fonts.ready){
-  document.fonts.ready.then(()=> drawConnectors(pendingConnectors));
+/* The card behind a person: the details that aren't worth room on the pod,
+   the switch that marks the end of a line, and what they are to you. */
+function openCard(id){
+  closeForm();
+  const p = state.people[id];
+  if (!p) return;
+  pending = { kind:'card', anchorId:id };
+  const rel = meId && meId !== id ? relationship(meId, id) : null;
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.innerHTML =
+    `<p class="cap">${esc(p.name)}</p>` +
+    (rel ? `<p class="lbl">To you</p><p class="relline">` +
+      `<b>${esc(rel.term || rel.choice || '')}</b>` +
+      `<span>${esc(rel.why)}</span></p>` : '') +
+    `<input id="cName" class="fld" value="${esc(p.name)}" placeholder="Name" autocomplete="off">` +
+    `<div class="seg" id="cSex">` +
+      `<button type="button" data-sex="f" aria-pressed="${p.sex === 'f'}">She</button>` +
+      `<button type="button" data-sex="m" aria-pressed="${p.sex === 'm'}">He</button>` +
+      `<button type="button" data-sex="" aria-pressed="${!p.sex}">—</button></div>` +
+    `<p class="lbl">Born · Died</p><div class="row">` +
+      `<input id="cBorn" class="fld" value="${esc(p.born || '')}" placeholder="Born" autocomplete="off">` +
+      `<input id="cDied" class="fld" value="${esc(p.died || '')}" placeholder="Died" autocomplete="off">` +
+    `</div>` +
+    `<input id="cTotem" class="fld" value="${esc(p.totem || '')}" placeholder="Totem / mutupo" autocomplete="off">` +
+    `<button class="btn ghost wide${p.root ? ' on' : ''}" id="cRoot">` +
+      `${p.root ? '● ' : ''}Furthest we can trace</button>` +
+    `<button class="btn ghost wide${meId === id ? ' on' : ''}" id="cMe">` +
+      `${meId === id ? '● This is you' : 'This is me'}</button>` +
+    `<div class="row"><button class="btn" id="cSave">Save</button>` +
+    `<button class="btn ghost" id="cNo">Close</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  el.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(btn =>
+    btn.onclick = () => seg.querySelectorAll('button')
+      .forEach(o => o.setAttribute('aria-pressed', String(o === btn)))));
+
+  const commit = () => {
+    snapshot();
+    p.name  = $('cName').value.trim() || p.name;
+    p.sex   = document.querySelector('#cSex button[aria-pressed="true"]').dataset.sex;
+    p.born  = $('cBorn').value.trim();
+    p.died  = $('cDied').value.trim();
+    p.totem = $('cTotem').value.trim();
+  };
+  $('cSave').onclick = () => { commit(); closeForm(); render(); save(); };
+  $('cNo').onclick = closeForm;
+  $('cRoot').onclick = () => { commit(); toggleRoot(id); closeForm(); render(); save();
+    say(`${p.name} ${p.root ? 'is now the root of the line' : 'is no longer marked as the root'}.`); };
+  $('cMe').onclick = () => { commit(); setMe(meId === id ? null : id); closeForm(); render(); save(); };
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); commit(); closeForm(); render(); save(); }
+    if (e.key === 'Escape'){ e.preventDefault(); closeForm(); }
+  });
+  $('cName').focus();
 }
 
-document.getElementById('contributorName').addEventListener('change', e=>{
-  myName = e.target.value.trim(); saveMyPrefs();
+/* ── grow form ──────────────────────────────────────────────────────── */
+const LABEL = { parent:'parent of', sibling:'sibling of', partner:'partner of', child:'child of' };
+
+function openForm(kind, anchorId){
+  closeForm();
+  pending = { kind, anchorId };
+  const anchor = state.people[anchorId];
+
+  // A new brother or sister has to land somewhere in the row, and birth order
+  // is the whole point of the row — so ask while the name is being typed.
+  const order = kind !== 'sibling' ? '' :
+    `<p class="lbl">Born</p><div class="seg" id="fOrder">` +
+    `<button type="button" data-pos="older" aria-pressed="false">Before ${esc(anchor.name.split(' ')[0])}</button>` +
+    `<button type="button" data-pos="younger" aria-pressed="true">After</button></div>`;
+
+  // Somebody who married more than once needs to say whose child this is.
+  const marriages = unionsOf(anchorId);
+  const withWho = (kind !== 'child' || marriages.length < 2) ? '' :
+    `<p class="lbl">With</p><div class="seg" id="fWith">` +
+    marriages.map((u, i) => {
+      const other = u.partners.find(x => x !== anchorId);
+      const who = other && state.people[other] ? state.people[other].name.split(' ')[0] : 'on their own';
+      return `<button type="button" data-union="${u.id}" aria-pressed="${i === 0}">${esc(who)}</button>`;
+    }).join('') + `</div>`;
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.innerHTML =
+    `<p class="cap">New <b>${LABEL[kind]}</b><br>${esc(anchor.name)}</p>` +
+    `<input id="fName" class="fld" placeholder="Name" autocomplete="off">` +
+    `<div class="seg" id="fSex">` +
+      `<button type="button" data-sex="f" aria-pressed="false">She</button>` +
+      `<button type="button" data-sex="m" aria-pressed="false">He</button>` +
+      `<button type="button" data-sex="" aria-pressed="true">—</button></div>` +
+    order + withWho +
+    `<input id="fTotem" class="fld" placeholder="Totem / mutupo (optional)" autocomplete="off">` +
+    `<div class="row">` +
+      `<input id="fBorn" class="fld" placeholder="Born" autocomplete="off">` +
+      `<input id="fDied" class="fld" placeholder="Died" autocomplete="off">` +
+    `</div>` +
+    `<div class="row"><button class="btn" id="fGo">Grow</button>` +
+    `<button class="btn ghost" id="fNo">Cancel</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  el.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b =>
+    b.onclick = () => seg.querySelectorAll('button')
+      .forEach(o => o.setAttribute('aria-pressed', String(o === b)))));
+  $('fGo').onclick = submitForm;
+  $('fNo').onclick = closeForm;
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); submitForm(); }
+    if (e.key === 'Escape'){ e.preventDefault(); closeForm(); }
+  });
+
+  // Watch the name as it is typed and offer anyone already in the tree who
+  // might be the same person, so two branches meeting in the middle join up
+  // instead of each keeping their own copy of a grandfather.
+  const box = document.createElement('div');
+  box.className = 'dupes';
+  $('fName').insertAdjacentElement('afterend', box);
+  const nameEl = $('fName');
+  const suggest = () => {
+    // the form may have closed while this was waiting its turn
+    if (!nameEl.isConnected) return;
+    const matches = matchesForName(nameEl.value, anchorId);
+    box.innerHTML = matches.map(({ id, m }) => {
+      const q = state.people[id];
+      const blocked = canLink(kind, anchorId, id);
+      const life = q.born ? `b. ${esc(q.born)} · ` : '';
+      const rel = meId ? (relationship(meId, id) || {}) : {};
+      const tag = rel.term ? ` · your ${esc(rel.term)}` : '';
+      return `<button type="button" class="dupe" data-link="${id}"${blocked ? ' disabled' : ''}` +
+        ` title="${esc(blocked || 'Link this person in rather than adding a second record')}">` +
+        `<u>${esc(q.name)}<small>${life}${esc(positionOf(id))}${tag}</small></u>` +
+        `<em>${blocked ? 'can’t link' : 'use this one'}</em></button>`;
+    }).join('');
+    box.querySelectorAll('.dupe:not([disabled])').forEach(btn => btn.onclick = () => {
+      const otherId = btn.dataset.link;
+      const before = screenOf(anchorId);
+      linkExisting(kind, anchorId, otherId);
+      closeForm();
+      sel = otherId;
+      render();
+      keepSteady(anchorId, before);
+      bringIntoView(otherId);
+      save();
+      say(`${state.people[otherId].name} linked in — one record, not two.`);
+    });
+  };
+  nameEl.addEventListener('input', () => {
+    clearTimeout(suggestTimer);
+    suggestTimer = setTimeout(suggest, 160);
+  });
+
+  $('fName').focus();
+}
+
+function placeForm(el){
+  const at = layout.persons[pending.anchorId];
+  if (!at) return;
+  const off = { parent:[0,190], sibling:[-230,0], partner:[230,0], child:[0,-190],
+                card:[0,0], dupes:[0,0] }[pending.kind] || [0, 0];
+  // offsetWidth/Height, not getBoundingClientRect — the form is mid-animation
+  // when it is first placed, and the rect would report its scaled-down size.
+  const halfW = (el.offsetWidth || 252) / 2, halfH = (el.offsetHeight || 300) / 2;
+  const padX = halfW + 12, padTop = halfH + 12, padBot = halfH + 88;   // clear the toolbar
+  let x = at.x * pos.k + pos.x + off[0];
+  let y = at.y * pos.k + pos.y + off[1];
+  x = Math.max(padX, Math.min(Math.max(padX, innerWidth - padX), x));
+  y = Math.max(padTop, Math.min(Math.max(padTop, innerHeight - padBot), y));
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+}
+
+function submitForm(){
+  const name = $('fName').value.trim();
+  if (!name){ $('fName').focus(); return; }
+  // Only warn when the name is an exact match and nothing else is known —
+  // a shared name is normal, so this must not cry wolf.
+  const near = matchesForName(name, pending.anchorId).filter(x => x.m.score >= 0.34);
+  if (near.length && !submitForm.confirmed){
+    // A strong match on the way out gets one plain question rather than a
+    // silent duplicate. Pressing Grow again goes ahead regardless.
+    const q = state.people[near[0].id];
+    const box = document.querySelector('#form .dupes');
+    if (box && !document.querySelector('#form .warn')){
+      box.insertAdjacentHTML('beforebegin',
+        `<p class="warn"><b>${esc(q.name)}</b> is already in the tree — ${esc(positionOf(near[0].id))}. ` +
+        `If that is the same person, use them above. If not, press Grow again: ` +
+        `two people in one family can share a name.</p>`);
+      submitForm.confirmed = true;
+      return;
+    }
+  }
+  submitForm.confirmed = false;
+  const pick = (id, attr) => {
+    const el = document.querySelector('#' + id + ' button[aria-pressed="true"]');
+    return el ? el.dataset[attr] : undefined;
+  };
+  const sex = pick('fSex', 'sex') || '';
+  const totem = $('fTotem').value;
+  const { kind, anchorId } = pending;
+  const before = screenOf(anchorId);
+  const id = grow(kind, anchorId, name, sex, totem, {
+    position:pick('fOrder', 'pos'), unionId:pick('fWith', 'union'),
+    born:$('fBorn').value, died:$('fDied').value
+  });
+  closeForm();
+  sel = id;
+  render();
+  keepSteady(anchorId, before);           // the person you grew from stays put
+  bringIntoView(id);                      // …and the new one is never off-screen
+  revealBuds();                           // …nor are the choices around them
+  save();
+  say(`${name} added as ${LABEL[kind]} ${state.people[anchorId].name}.`);
+}
+
+/* Growing re-flows the whole tree. Pin the person you grew from to the same
+   spot on screen so the tree appears to grow around them rather than jump. */
+function screenOf(id){
+  const at = layout.persons[id];
+  return at ? { x:at.x * pos.k + pos.x, y:at.y * pos.k + pos.y } : null;
+}
+/* Selecting somebody near the edge shouldn't hide their own buds — nudge the
+   view just enough to give them room, which matters most on a phone. */
+function bringIntoView(id){
+  const s = screenOf(id);
+  if (!s) return;
+  const mx = Math.min(200, innerWidth * 0.28), top = 120, bot = 150;
+  let dx = 0, dy = 0;
+  if (s.x < mx) dx = mx - s.x;
+  else if (s.x > innerWidth - mx) dx = innerWidth - mx - s.x;
+  if (s.y < top) dy = top - s.y;
+  else if (s.y > innerHeight - bot) dy = innerHeight - bot - s.y;
+  if (dx || dy){ pos.x += dx; pos.y += dy; applyTransform(); }
+}
+
+/* Measure what actually got drawn and shift the view so the selected person
+   and every bud around them are on screen. A choice you can't see is a choice
+   you don't have. */
+function revealBuds(){
+  const pod = podsEl.querySelector('.pod.sel');
+  if (!pod) return;
+  const parts = [pod, ...$('buds').querySelectorAll('.bud')].map(el => el.getBoundingClientRect());
+  const box = parts.reduce((a, r) => ({
+    left:Math.min(a.left, r.left), right:Math.max(a.right, r.right),
+    top:Math.min(a.top, r.top), bottom:Math.max(a.bottom, r.bottom)
+  }), { left:Infinity, right:-Infinity, top:Infinity, bottom:-Infinity });
+
+  const pad = 14, barTop = innerHeight - 74;    // keep clear of the toolbar
+  let dx = 0, dy = 0;
+  if (box.right - box.left < innerWidth - pad * 2){
+    if (box.left < pad) dx = pad - box.left;
+    else if (box.right > innerWidth - pad) dx = innerWidth - pad - box.right;
+  }
+  if (box.bottom - box.top < barTop - pad){
+    if (box.top < pad) dy = pad - box.top;
+    else if (box.bottom > barTop) dy = barTop - box.bottom;
+  }
+  if (dx || dy){ pos.x += dx; pos.y += dy; applyTransform(); }
+}
+
+function keepSteady(id, before){
+  const after = screenOf(id);
+  if (!before || !after) return;
+  pos.x += before.x - after.x;
+  pos.y += before.y - after.y;
+  applyTransform();
+}
+
+let suggestTimer = null;
+
+function closeForm(){
+  clearTimeout(suggestTimer);
+  const f = $('form');
+  if (f) f.remove();
+  pending = null;
+  submitForm.confirmed = false;
+}
+const say = m => { $('live').textContent = m; };
+
+/* Who is holding the phone. This never goes into the shared tree — each
+   relative's own device remembers who they are, so the same tree reads
+   differently, and correctly, for every one of them. */
+const ME_KEY = 'muti-baobab-me';
+
+function setMe(id){
+  meId = id;
+  pickingMe = false;
+  try { id ? localStorage.setItem(ME_KEY, id) : localStorage.removeItem(ME_KEY); } catch (e) {}
+  updateWho();
+  render();
+  if (id) say(`${state.people[id].name} is you. Tap anyone to see what they are to you.`);
+}
+
+function updateWho(){
+  const btn = $('who');
+  if (!btn) return;
+  const p = meId && state.people[meId];
+  btn.classList.toggle('active', pickingMe);
+  btn.innerHTML = pickingMe ? 'Tap your own name' : `You: <b>${p ? esc(p.name.split(' ')[0]) : '—'}</b>`;
+  btn.title = p ? `Terms are shown from ${p.name}'s side. Tap to change.`
+                : 'Say who you are, and every name will tell you what they are to you.';
+}
+
+/* The ribbon under whoever is selected: the Shona term, and the trace that
+   produced it, so it can be checked rather than taken on faith. */
+function relationRibbon(spot){
+  if (!spot) return '';
+  const r = relationship(meId, sel);
+  if (!r) return '';
+  return `<div class="term${r.term ? '' : ' none'}" data-card="${sel}" role="button" tabindex="0"` +
+    ` style="left:${spot[0].toFixed(1)}px; top:${spot[1].toFixed(1)}px">` +
+    `<b>${esc(r.term || r.choice || 'Not named yet')}</b>` +
+    `<span>${esc(r.why)}</span></div>`;
+}
+
+/* ── interaction ────────────────────────────────────────────────────── */
+const budsEl = $('buds');
+budsEl.addEventListener('pointerdown', e => { if (e.target.closest('.bud')) e.stopPropagation(); });
+budsEl.addEventListener('click', e => {
+  const ribbon = e.target.closest('.term');
+  if (ribbon){ openCard(ribbon.dataset.card); return; }
+  const bud = e.target.closest('.bud');
+  if (bud) openForm(bud.dataset.bud, bud.dataset.anchor);
 });
-document.getElementById('egoSelect').addEventListener('change', e=>{
-  meId = e.target.value || null;
-  saveMyPrefs(); render();
-});
-document.getElementById('refreshBtn').addEventListener('click', ()=>{ loadData(); });
-document.getElementById('orientBtn').addEventListener('click', ()=>{
-  orientation = orientation === 'down' ? 'right' : 'down';
-  document.getElementById('orientBtn').textContent = orientation === 'down' ? '⇅ Top-down' : '⇄ Left-right';
-  saveMyPrefs(); render();
-});
-document.getElementById('newBranchBtn').addEventListener('click', ()=>{
-  const fid = genId(), mid = genId();
-  people[fid] = {id:fid, name:'New ancestor', sex:'M', totem:'', fatherId:null, motherId:null, spouseId:mid, order:0, addedBy: myName};
-  people[mid] = {id:mid, name:'New ancestor', sex:'F', totem:'', fatherId:null, motherId:null, spouseId:fid, order:0, addedBy: myName};
-  saveData(); render();
-});
-document.getElementById('toggleLegend').addEventListener('click', ()=>{
-  document.getElementById('legend').classList.toggle('open');
-});
-document.getElementById('resetBtn').addEventListener('click', ()=>{
-  document.getElementById('confirmBar').style.display = 'flex';
-});
-document.getElementById('confirmNo').addEventListener('click', ()=>{
-  document.getElementById('confirmBar').style.display = 'none';
-});
-document.getElementById('confirmYes').addEventListener('click', ()=>{
-  seedDefault(); meId = null; saveData(); saveMyPrefs(); render();
-  document.getElementById('confirmBar').style.display = 'none';
+budsEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' '){
+    const t = e.target.closest('.bud,.term');
+    if (t){ e.preventDefault(); t.click(); }
+  }
 });
 
-loadData();
+podsEl.addEventListener('pointerdown', e => e.stopPropagation());
+podsEl.addEventListener('click', e => {
+  const card = e.target.closest('[data-card]');
+  if (card){ openCard(card.dataset.card); return; }
+
+  const ord = e.target.closest('.ord');
+  if (ord){
+    const who = ord.dataset.who;
+    const kept = screenOf(who);
+    reorder(who, Number(ord.dataset.ord));
+    render();
+    keepSteady(who, kept);
+    save();
+    say(`${state.people[who].name} is now ${rankLabel(who, true).toLowerCase() || 'moved'}.`);
+    return;
+  }
+  const rm = e.target.closest('.rm');
+  if (rm){
+    const p = state.people[rm.dataset.rm];
+    if (p && confirm(`Remove ${p.name} from the tree?`)){
+      removePerson(p.id); sel = null; closeForm(); render(); save();
+    }
+    return;
+  }
+  const socket = e.target.closest('.socket');
+  if (socket){ openForm('parent', socket.dataset.socket); return; }
+
+  const pod = e.target.closest('.pod');
+  if (pod){
+    if (pickingMe){ setMe(pod.dataset.id); return; }
+    sel = (sel === pod.dataset.id) ? null : pod.dataset.id;
+    closeForm(); render();
+    if (sel){ bringIntoView(sel); revealBuds(); }
+  }
+});
+podsEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' '){
+    const t = e.target.closest('.ord,.rm,.pod');
+    if (t){ e.preventDefault(); t.click(); }
+  }
+});
+
+let drag = null;
+const touches = new Map();   // pointerId -> {x,y}, so two fingers can pinch
+let pinch = null;
+
+const zoomAt = (k, cx, cy) => {
+  k = Math.max(0.25, Math.min(2.4, k));
+  pos.x = cx - (cx - pos.x) * (k / pos.k);
+  pos.y = cy - (cy - pos.y) * (k / pos.k);
+  pos.k = k;
+  applyTransform();
+};
+
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('#form')) return;
+  touches.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  if (touches.size === 2){
+    const [a, b] = [...touches.values()];
+    pinch = { d:Math.hypot(a.x - b.x, a.y - b.y), k:pos.k };
+    drag = null;
+    stage.classList.remove('dragging');
+    return;
+  }
+  drag = { sx:e.clientX, sy:e.clientY, ox:pos.x, oy:pos.y, moved:false };
+  stage.classList.add('dragging');
+  stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener('pointermove', e => {
+  if (touches.has(e.pointerId)) touches.set(e.pointerId, { x:e.clientX, y:e.clientY });
+  if (pinch && touches.size === 2){
+    const [a, b] = [...touches.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinch.d > 0) zoomAt(pinch.k * (d / pinch.d), (a.x + b.x)/2, (a.y + b.y)/2);
+    return;
+  }
+  if (!drag) return;
+  pos.x = drag.ox + (e.clientX - drag.sx);
+  pos.y = drag.oy + (e.clientY - drag.sy);
+  if (Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) > 4) drag.moved = true;
+  applyTransform();
+});
+const endPointer = e => {
+  touches.delete(e.pointerId);
+  if (touches.size < 2) pinch = null;
+  const wasDrag = drag && drag.moved;
+  drag = null; stage.classList.remove('dragging');
+  if (!wasDrag && !pinch && !e.target.closest('.pod,.bud,#form,#bar,#seed')){
+    sel = null; closeForm(); render();
+  }
+};
+stage.addEventListener('pointerup', endPointer);
+stage.addEventListener('pointercancel', endPointer);
+stage.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomAt(pos.k * (e.deltaY < 0 ? 1.12 : 1/1.12), e.clientX, e.clientY);
+}, { passive:false });
+
+function fit(){
+  const pts = Object.values(layout.persons).concat((layout.sockets || []).map(q => ({ x:q.x, y:q.y })));
+  if (!pts.length){ pos = { x:innerWidth/2, y:innerHeight*0.6, k:1 }; applyTransform(); return; }
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const minX = Math.min(...xs) - POD_W, maxX = Math.max(...xs) + POD_W;
+  const minY = Math.min(...ys) - POD_H*1.8, maxY = Math.max(...ys) + POD_H*1.8;
+  pos.k = Math.max(0.5, Math.min(1.15, Math.min((innerWidth - 80) / (maxX - minX || 1),
+                                                (innerHeight - 170) / (maxY - minY || 1))));
+  pos.x = innerWidth/2  - ((minX + maxX)/2) * pos.k;
+  pos.y = innerHeight/2 - ((minY + maxY)/2) * pos.k;
+  applyTransform();
+}
+
+$('who').onclick = () => {
+  if (meId){ setMe(null); return; }
+  pickingMe = !pickingMe;
+  updateWho();
+  say(pickingMe ? 'Tap your own name in the tree.' : '');
+};
+
+$('dupes').onclick = openDuplicates;
+
+$('fit').onclick = fit;
+$('undo').onclick = () => {
+  if (!history.length) return;
+  state = JSON.parse(history.pop());
+  sel = null; closeForm(); render(); save();
+};
+$('clear').onclick = () => {
+  if (!confirm('Clear the whole tree and start again?')) return;
+  snapshot();
+  state = { people:{}, unions:{}, rootId:null, seq:1 };
+  sel = null; closeForm(); render(); save();
+};
+
+$('seedGo').onclick = plant;
+$('seedName').addEventListener('keydown', e => { if (e.key === 'Enter') plant(); });
+function plant(){
+  const name = $('seedName').value.trim();
+  if (!name){ $('seedName').focus(); return; }
+  snapshot();
+  state.rootId = sel = addPerson(name, '', '');
+  $('seedName').value = '';
+  pos = { x:innerWidth/2, y:innerHeight*0.6, k:1 };
+  render(); save();
+  say(`${name} planted. Tap them to grow the tree.`);
+}
+
+addEventListener('resize', applyTransform);
+addEventListener('keydown', e => { if (e.key === 'Escape' && !pending && sel){ sel = null; render(); } });
+
+/* ── storage ────────────────────────────────────────────────────────────
+   On the deployed site this talks to the shared /api/shared endpoint so the
+   whole family sees one tree. Anywhere else it quietly keeps the tree in
+   this browser instead. */
+let remote = false, timer = null;
+
+async function load(){
+  try {
+    const r = await fetch('/api/shared/' + KEY, { headers:{ Accept:'application/json' } });
+    if (r.ok && (r.headers.get('content-type') || '').includes('json')){
+      remote = true;
+      const d = await r.json();
+      if (d && d.value) state = JSON.parse(d.value);
+    }
+  } catch (e) { /* not deployed — fine */ }
+  if (!remote){
+    try { const raw = localStorage.getItem(KEY); if (raw) state = JSON.parse(raw); } catch (e) {}
+  }
+  if (!state || !state.people) state = { people:{}, unions:{}, rootId:null, seq:1 };
+  if (!state.notDuplicates) state.notDuplicates = [];
+  try {
+    const saved = localStorage.getItem(ME_KEY);
+    if (saved && state.people[saved]) meId = saved;
+  } catch (e) {}
+  updateWho();
+  render();
+  if (people().length) fit();
+}
+
+function save(){
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const value = JSON.stringify(state);
+    if (remote){
+      try {
+        await fetch('/api/shared/' + KEY, { method:'PUT',
+          headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ value }) });
+        return;
+      } catch (e) { /* fall through */ }
+    }
+    try { localStorage.setItem(KEY, value); } catch (e) {}
+  }, 400);
+}
+
+pos = { x:innerWidth/2, y:innerHeight*0.6, k:1 };
+load();
 </script>
 </body>
 </html>

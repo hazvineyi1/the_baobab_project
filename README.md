@@ -1,13 +1,12 @@
-# Muti weMhuri — a collaborative Shona family tree
+# The Baobab Project
 
-A shared, editable family tree with a built-in Shona kinship-term engine
-(the classificatory system where there's no "aunt," "uncle," or "cousin" —
-just Baba, Tete, Sekuru, Mukoma, and so on), totems, and a layout that
-grows top-down or left-to-right with foldable branches for big trees.
+A shared, editable Shona family tree with a built-in kinship-term engine —
+the classificatory system where there is no "aunt", "uncle" or "cousin", just
+Baba, Tete, Sekuru, Mukoma and so on — plus totems, birth order, and a baobab
+that grows roots down into the soil and branches up into the canopy.
 
-This is a small Node/Express app with one tiny API for the data everyone
-shares, and a static frontend that does all the actual tree logic in the
-browser.
+The whole frontend is one self-contained file with no build step
+(`public/index.html`). The server is Node/Express over Postgres.
 
 ## Storage
 

@@ -6,7 +6,7 @@
 
 const { check, eq, section, freshPool, newTree, report } = require('./helpers');
 const { applyOps } = require('../db/ops');
-const { findDuplicates, nameSimilarity, WEIGHTS } = require('../db/duplicates');
+const { findDuplicates, nameSimilarity, WEIGHTS, THRESHOLD } = require('../db/duplicates');
 
 (async () => {
   const pool = await freshPool();
@@ -50,19 +50,25 @@ const { findDuplicates, nameSimilarity, WEIGHTS } = require('../db/duplicates');
 
   section('a real duplicate — two records married to the same man');
   // Rufaro's wife entered twice, once with a title, by two different relatives.
+  // Recorded as a SEPARATE union, which is how it actually happens: two
+  // relatives each enter Rufaro's marriage from their own side. Adding her to
+  // the same union instead would make the two records each other's spouse,
+  // and sameness() then refuses to compare them at all.
   const d = await ops([
     { op: 'addPerson', ref: '$dup', name: 'Mai Chipo Dube', sex: 'f', born: '1955' },
-    { op: 'addPartner', unionId: id('u2'), personId: '$dup' }
+    { op: 'addUnion', ref: '$u2b' },
+    { op: 'addPartner', unionId: '$u2b', personId: id('dad') },
+    { op: 'addPartner', unionId: '$u2b', personId: '$dup' }
   ]);
   scan = await findDuplicates(pool, tree);
   const pair = scan.pairs.find(p =>
     [p.a.id, p.b.id].includes(id('mum')) && [p.a.id, p.b.id].includes(d.refs['$dup']));
   check('the pair is flagged', !!pair, scan.pairs.map(p => `${p.a.name}/${p.b.name}=${p.score}`).join('; '));
   check('because of the shared spouse, not the name',
-        pair?.why.some(w => w.signal === 'shared spouse'),
+        pair?.why.some(w => /^both married to /.test(w)),
         JSON.stringify(pair?.why));
   check('and the title did not stop them matching',
-        pair?.score > WEIGHTS.NAME_CAP, `score=${pair?.score}`);
+        pair?.score > WEIGHTS.NAME_SAME, `score=${pair?.score}`);
 
   section('a name on its own can never flag a pair');
   const far = await ops([
@@ -74,8 +80,9 @@ const { findDuplicates, nameSimilarity, WEIGHTS } = require('../db/duplicates');
     [p.a.id, p.b.id].includes(far.refs['$x']) && [p.a.id, p.b.id].includes(far.refs['$y']));
   check('two unconnected people with identical names are not flagged', !namePair);
   check('the name signal alone cannot reach the threshold',
-        WEIGHTS.NAME_CAP < scan.threshold,
-        `cap=${WEIGHTS.NAME_CAP} threshold=${scan.threshold}`);
+        WEIGHTS.NAME_SAME + WEIGHTS.SAME_GENERATION < scan.threshold,
+        `best possible name+generation=${WEIGHTS.NAME_SAME + WEIGHTS.SAME_GENERATION} ` +
+        `threshold=${scan.threshold}`);
 
   section('a dismissal survives, and survives a reload');
   await ops([{ op: 'dismissDuplicate', aId: id('mum'), bId: d.refs['$dup'] }]);
@@ -109,7 +116,8 @@ const { findDuplicates, nameSimilarity, WEIGHTS } = require('../db/duplicates');
   check('two records as children of the same couple are flagged', !!mergePair,
         `score=${mergePair?.score}`);
   check('because they share a parent union',
-        mergePair?.why.some(w => w.signal === 'same parents'));
+        mergePair?.why.some(w => /same children|same parents/.test(w)),
+        JSON.stringify(mergePair?.why));
 
   const beforeCount = (await pool.query('SELECT count(*)::int n FROM people WHERE tree_id=$1', [tree])).rows[0].n;
   await ops([{ op: 'mergePeople', keepId: id('dad'), mergeId: m.refs['$dup2'] }]);
@@ -133,17 +141,23 @@ const { findDuplicates, nameSimilarity, WEIGHTS } = require('../db/duplicates');
   eq('the survivor gained the detail it was missing', [kept.totem, kept.born], ['Shumba', '1944']);
 
   section('scoring signals');
-  eq('an identical name scores 1', nameSimilarity('garikai', 'garikai'), 1);
-  check('a near-miss spelling still scores high',
-        nameSimilarity('garikai', 'garikayi') > 0.6,
-        String(nameSimilarity('garikai', 'garikayi')));
-  check('unrelated names score low',
-        nameSimilarity('garikai', 'chipo') < 0.2);
+  eq('an identical name scores the full name weight',
+     nameSimilarity('Garikai', 'Garikai').score, WEIGHTS.NAME_SAME);
+  eq('a title makes no difference to the score',
+     nameSimilarity('Sekuru Garikai', 'Garikai').score, WEIGHTS.NAME_SAME);
+  check('a near-miss spelling still matches',
+        nameSimilarity('Garikai', 'Garikayi') !== null,
+        JSON.stringify(nameSimilarity('Garikai', 'Garikayi')));
+  eq('unrelated names do not match at all',
+     nameSimilarity('Garikai', 'Chipo'), null);
+  eq('a name that is nothing but a title never matches',
+     nameSimilarity('Baba', 'Baba'), null);
   eq('weights are the ported values, unchanged',
      [WEIGHTS.SHARED_SPOUSE, WEIGHTS.SHARED_CHILD, WEIGHTS.SAME_PARENT_UNION,
       WEIGHTS.GENERATION_APART, WEIGHTS.DIFFERENT_PARENTS, WEIGHTS.DIFFERENT_SEX,
-      WEIGHTS.NAME_CAP],
+      WEIGHTS.NAME_SAME],
      [0.5, 0.5, 0.4, -0.45, -0.4, -0.6, 0.34]);
+  eq('the threshold is the frontend\'s', THRESHOLD, 0.5);
 
   section('the scan does not compare everyone to everyone');
   check('far fewer comparisons than the naive scan',

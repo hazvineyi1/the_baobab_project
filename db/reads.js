@@ -176,7 +176,11 @@ async function search(pool, treeId, q, { limit = 25 } = {}) {
            similarity(name_key, $2) AS score
       FROM people
      WHERE tree_id = $1
-       AND (name_key LIKE $2 || '%' OR similarity(name_key, $2) > 0.3)
+       AND (name_key LIKE $2 || '%' OR similarity(name_key, $2) > 0.3
+            -- name_key is empty when a record is nothing but an honorific
+            -- ("Baba"). Such a person is not a duplicate candidate, but they
+            -- must still be findable, so fall back to the raw name.
+            OR (name_key = '' AND lower(name) LIKE '%' || $2 || '%'))
      ORDER BY exact DESC, prefix DESC, score DESC, born_year ASC NULLS LAST
      LIMIT $3` : `
     SELECT ${PERSON_COLS},
@@ -184,7 +188,9 @@ async function search(pool, treeId, q, { limit = 25 } = {}) {
            true AS prefix,
            0::real AS score
       FROM people
-     WHERE tree_id = $1 AND name_key LIKE $2 || '%'
+     WHERE tree_id = $1
+       AND (name_key LIKE $2 || '%'
+            OR (name_key = '' AND lower(name) LIKE '%' || $2 || '%'))
      ORDER BY exact DESC, born_year ASC NULLS LAST
      LIMIT $3`;
 

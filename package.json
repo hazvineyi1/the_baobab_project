@@ -1,7 +1,7 @@
 {
-  "name": "muti-wemhuri",
+  "name": "the-baobab-project",
   "version": "1.0.0",
-  "description": "A collaborative Shona family tree with kinship-term logic, built for deployment on Railway.",
+  "description": "The Baobab Project \u2014 a collaborative Shona family tree with kinship-term logic, built for deployment on Railway.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
