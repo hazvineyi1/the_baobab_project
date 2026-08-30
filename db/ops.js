@@ -428,6 +428,80 @@ const HANDLERS = {
     return { id };
   },
 
+  /* Say that a person in this tree and a person in another tree are the same
+     ancestor.
+
+     This does NOT merge anything. Two families finding a shared grandfather
+     does not make them one record under one owner — each keeps their own
+     tree, their own version of him, and their own memory of him. The link
+     says "your Rufaro and our Rufaro are the same man" and stops there.
+     Anything stronger would be one family's records being absorbed into
+     another's on the strength of a name and a date. */
+  async proposeLink(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const mine = resolve(op.personId, 'proposeLink.personId');
+    const theirs = String(op.otherPersonId || '');
+    if (!UUID_RE.test(theirs)) {
+      throw badRequest('proposeLink.otherPersonId: expected the id of a person in another tree');
+    }
+    if (mine === theirs) throw badRequest('A person cannot be linked to themselves');
+
+    const { rows } = await client.query(
+      'SELECT id, tree_id FROM people WHERE id = ANY($1::uuid[])', [[mine, theirs]]);
+    const other = rows.find(r => r.id === theirs);
+    if (!other) throw badRequest('proposeLink.otherPersonId: no such person');
+    if (other.tree_id === treeId) {
+      // Within one tree the answer is mergePeople, which folds the records
+      // together. Across trees nothing is folded. Confusing the two would
+      // silently do the wrong one.
+      throw badRequest('Those are both in this tree — that is a duplicate to merge, not a link');
+    }
+
+    // One row per pair whichever family proposes it, matching the CHECK.
+    const [a, b] = [mine, theirs].sort();
+    const [aTree, bTree] = a === mine ? [treeId, other.tree_id] : [other.tree_id, treeId];
+
+    const { rows: [row] } = await client.query(
+      `INSERT INTO tree_links (a_person, b_person, a_tree, b_tree, status, score, why, proposed_by)
+       VALUES ($1,$2,$3,$4,'proposed',$5,$6,$7)
+       ON CONFLICT (a_person, b_person) DO UPDATE SET
+         status = CASE WHEN tree_links.status = 'rejected' THEN 'proposed'
+                       ELSE tree_links.status END,
+         score = EXCLUDED.score
+       RETURNING id, status`,
+      [a, b, aTree, bTree, op.score ?? null, String(op.why || '').slice(0, 500), actor || '']);
+
+    await logChange(client, treeId, 'link', mine, 'proposeLink',
+                    { personId: mine, otherPersonId: theirs, linkId: row.id }, actor);
+    return { linkId: row.id, status: row.status, personId: mine, otherPersonId: theirs };
+  },
+
+  /* Agree, or disagree, with a proposed link. A rejection is KEPT rather than
+     deleted: without it the same suggestion returns on every scan for ever,
+     and the work somebody did judging it is thrown away each time. */
+  async decideLink(ctx, op) {
+    const { client, treeId, actor } = ctx;
+    const linkId = String(op.linkId || '');
+    if (!UUID_RE.test(linkId)) throw badRequest('decideLink.linkId: expected an id');
+    const status = op.status === 'confirmed' ? 'confirmed'
+                 : op.status === 'rejected'  ? 'rejected' : null;
+    if (!status) throw badRequest("decideLink.status must be 'confirmed' or 'rejected'");
+
+    const { rows } = await client.query(
+      'SELECT a_tree, b_tree FROM tree_links WHERE id = $1', [linkId]);
+    if (!rows.length) throw notFound(`link ${linkId} does not exist`);
+    // Only the two families concerned get a say in whether they are related.
+    if (rows[0].a_tree !== treeId && rows[0].b_tree !== treeId) {
+      throw badRequest('That link is between two other families');
+    }
+
+    await client.query(
+      `UPDATE tree_links SET status = $2, decided_by = $3, decided_at = clock_timestamp()
+        WHERE id = $1`, [linkId, status, actor || '']);
+    await logChange(client, treeId, 'link', null, 'decideLink', { linkId, status }, actor);
+    return { linkId, status };
+  },
+
   async mergePeople(ctx, op) {
     const { client, treeId, actor, resolve } = ctx;
     const keepId = resolve(op.keepId, 'mergePeople.keepId');

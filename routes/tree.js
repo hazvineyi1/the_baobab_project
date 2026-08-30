@@ -7,6 +7,7 @@ const express = require('express');
 const { applyOps } = require('../db/ops');
 const { bootstrap, fullTree, changesSince, search, setAsideList } = require('../db/reads');
 const { findDuplicates } = require('../db/duplicates');
+const { findRelatives, linksFor } = require('../db/crosstree');
 const { OpError } = require('../db/errors');
 
 function sendError(res, e) {
@@ -143,6 +144,29 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
       const recordedBy = req.query.recordedBy;
       res.json(await setAsideList(pool, req.params.id,
         recordedBy === undefined ? {} : { recordedBy: String(recordedBy) }));
+    } catch (e) { sendError(res, e); }
+  });
+
+  /* Families this one may share an ancestor with.
+ 
+     Computed on demand and never stored: it is derived from names, totems and
+     dates that change as families record more, so a stored match would be a
+     stored answer going stale. What gets stored is a human's decision about
+     one, which does not. */
+  r.get('/tree/:id/relatives', async (req, res) => {
+    try {
+      res.json(await findRelatives(pool, req.params.id, {
+        threshold: req.query.threshold ? Number(req.query.threshold) : undefined,
+        limit: req.query.limit ? Number(req.query.limit) : undefined
+      }));
+    } catch (e) { sendError(res, e); }
+  });
+
+  /* Links already proposed, confirmed or rejected, from this tree's side. */
+  r.get('/tree/:id/links', async (req, res) => {
+    try {
+      const status = req.query.status ? String(req.query.status) : null;
+      res.json({ treeId: req.params.id, links: await linksFor(pool, req.params.id, status) });
     } catch (e) { sendError(res, e); }
   });
 

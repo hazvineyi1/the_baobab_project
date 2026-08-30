@@ -521,6 +521,16 @@ body{
   box-shadow:inset 0 0 0 1.5px var(--gold-soft);
 }
 #bar button.notice:hover{color:var(--gold);}
+/* A row in a panel that is information rather than a button. */
+#form .askrow.static{cursor:default;}
+#form .askrow.static:hover{background:var(--pod);}
+#form .askrow .mini{
+  flex:none; margin-left:8px; padding:5px 11px; border-radius:999px; cursor:pointer;
+  background:transparent; border:1.5px solid var(--pod-edge); color:var(--ink);
+  font-family:'Karla',sans-serif; font-size:11.5px; font-weight:600;
+}
+#form .askrow .mini:hover{border-color:var(--gold); color:var(--gold);}
+#form .askrow .mini:disabled{opacity:.5; cursor:default;}
 #bar .tally{
   padding:0 12px 0 10px; color:var(--muted); font-size:12px;
   border-left:1px solid var(--pod-edge); margin-left:4px;
@@ -608,6 +618,7 @@ body{
   <button class="who" id="who">You: <b>—</b></button>
   <button class="who" id="roots">Roots</button>
   <button class="who" id="aside" hidden></button>
+  <button class="who" id="families" hidden>Other families</button>
   <button class="who" id="kin">Kinship</button>
   <button class="dupes" id="dupes" hidden></button>
   <span class="tally"><b id="count">0</b> in the tree</span>
@@ -2673,6 +2684,132 @@ function openDuplicates(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
+/* Other families who may share an ancestor with this one.
+ 
+   The point of the whole project, in one screen: everybody records their own
+   people, and the lines keep going back until two of them arrive at the same
+   man. Until this existed a tree could only ever find duplicates inside
+   itself, so two families who both traced to one Sekuru would each mark him
+   as their own root and never learn about each other.
+ 
+   Nothing here happens on its own. A match is a suggestion, computed fresh
+   every time and never stored — it is derived from names and dates that
+   change as families record more, so a stored match would go stale the way a
+   stored kinship term would. Only a person's decision about one is written
+   down, and saying yes links the two records without merging anything: each
+   family keeps their own tree, their own version of him, and their own
+   memory of him. */
+async function openFamilies(){
+  closeForm();
+  pending = { kind:'dupes', anchorId: sel || state.rootId };
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML = `<p class="cap">Other families</p><p class="covnote">Looking…</p>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  let found = { matches: [] }, links = [];
+  try {
+    [found, links] = await Promise.all([
+      fetch(`/api/tree/${treeId}/relatives`).then(r => r.json()),
+      fetch(`/api/tree/${treeId}/links`).then(r => r.json()).then(d => d.links || [])
+    ]);
+  } catch (e) {
+    el.innerHTML = `<p class="cap">Other families</p>` +
+      `<p class="warn">Could not reach the other families just now.</p>` +
+      `<div class="row"><button class="btn" id="fmNo">Close</button></div>`;
+    placeForm(el);
+    $('fmNo').onclick = closeForm;
+    return;
+  }
+
+  const pct = n => Math.round(n * 100);
+  const matchRow = x =>
+    `<div class="askrow static">` +
+      `<u>${esc(x.mine.name)} <small style="display:inline">may be</small> ` +
+        `${esc(x.theirs.name)}` +
+        `<small>in the ${esc(x.theirs.treeName)} family` +
+          `${x.theirs.born ? ` · b. ${esc(x.theirs.born)}` : ''}</small>` +
+        `<small>${x.why.map(esc).join(' · ')}</small>` +
+        (x.against.length ? `<small>against: ${x.against.map(esc).join(' · ')}</small>` : '') +
+      `</u>` +
+      `<button type="button" class="mini" data-link="${x.mine.id}|${x.theirs.id}|${x.score}">` +
+        `same person</button>` +
+    `</div>`;
+
+  const linkRow = l =>
+    `<div class="askrow static">` +
+      `<u>${esc(l.mine.name)} — ${esc(l.theirs.name)}` +
+        `<small>the ${esc(l.theirs.treeName)} family · ` +
+          `${l.status === 'confirmed' ? 'both families agree'
+            : l.status === 'rejected' ? 'not the same person'
+            : 'waiting on them'}${l.decidedBy ? ` · ${esc(l.decidedBy)}` : ''}</small></u>` +
+      (l.status === 'proposed'
+        ? `<button type="button" class="mini" data-decide="${l.id}|confirmed">yes</button>` +
+          `<button type="button" class="mini" data-decide="${l.id}|rejected">no</button>`
+        : `<em>${l.status === 'confirmed' ? 'joined' : 'no'}</em>`) +
+    `</div>`;
+
+  const open = links.filter(l => l.status === 'proposed');
+  const settled = links.filter(l => l.status !== 'proposed');
+
+  el.innerHTML =
+    `<p class="cap">Other families</p>` +
+    (found.shared === false
+      ? `<p class="warn">This family has asked not to be compared with others.</p>`
+      : `<p class="covnote">Families recording their own people, who may have ` +
+        `written down the same ancestor as you. Nothing is joined unless ` +
+        `somebody says so — and joining links the two records, it does not ` +
+        `merge the families.</p>`) +
+
+    (open.length ? `<p class="lbl">Waiting on an answer</p>` + open.map(linkRow).join('') : '') +
+
+    (found.matches && found.matches.length
+      ? `<p class="lbl" style="margin-top:${open.length ? 14 : 10}px;">Might be the same person</p>` +
+        found.matches.map(matchRow).join('')
+      : found.shared === false ? ''
+      : `<p class="covnote">No other family has recorded anybody who looks like ` +
+        `one of yours yet. The further back your lines go, the likelier that ` +
+        `changes.</p>`) +
+
+    (settled.length
+      ? `<p class="lbl" style="margin-top:14px;">Already decided</p>` + settled.map(linkRow).join('')
+      : '') +
+
+    `<div class="row"><button class="btn" id="fmNo">Close</button></div>`;
+
+  // Placed once while it still said "Looking…", when it was two lines tall.
+  // The answer can be a long list, and a panel positioned for its placeholder
+  // ends up with its lower rows underneath the toolbar.
+  placeForm(el);
+
+  el.querySelectorAll('[data-link]').forEach(b => b.onclick = async () => {
+    const [mine, theirs, score] = b.dataset.link.split('|');
+    b.disabled = true; b.textContent = 'sending…';
+    try {
+      await postOps([{ op:'proposeLink', personId:mine, otherPersonId:theirs,
+                       score:Number(score) }]);
+      say('Sent. The other family will be asked whether they agree.');
+      openFamilies();
+    } catch (e) { b.textContent = 'could not send'; }
+  });
+  el.querySelectorAll('[data-decide]').forEach(b => b.onclick = async () => {
+    const [linkId, status] = b.dataset.decide.split('|');
+    b.disabled = true;
+    try {
+      await postOps([{ op:'decideLink', linkId, status }]);
+      say(status === 'confirmed'
+        ? 'Joined. Both families now show the same ancestor.'
+        : 'Recorded as not the same person.');
+      openFamilies();
+    } catch (e) { b.textContent = '!'; }
+  });
+  $('fmNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
 /* Everyone currently out of the tree, and how to bring them back.
  
    Two lists, and the order is the point. Entries YOU recorded that somebody
@@ -3545,6 +3682,10 @@ function updateAside(){
 
 function updateWho(){
   updateAside();
+  // Only worth offering once there is a tree to compare, and only when there
+  // is a server holding other families to compare it with.
+  const fam = $('families');
+  if (fam) fam.hidden = store !== 'shared' || people().length < 2;
   const btn = $('who');
   if (!btn) return;
   const p = meId && state.people[meId];
@@ -3721,6 +3862,7 @@ $('roots').onclick = openRoots;
 // been recorded since. Starting clean is the honest recovery.
 $('stalledGo').onclick = () => location.reload();
 $('aside').onclick = openAside;
+$('families').onclick = openFamilies;
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {
@@ -4030,11 +4172,7 @@ async function flush(){
 
   sending = true;
   try {
-    const r = await fetch(`/api/tree/${treeId}/ops`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'X-Muti-Actor': meName() },
-      body: JSON.stringify({ ops })
-    });
+    const r = await postOps(ops);
 
     if (r.status === 409){
       // Somebody else changed one of these records while this page was
@@ -4068,6 +4206,14 @@ async function flush(){
   } finally {
     sending = false;
   }
+}
+
+function postOps(ops){
+  return fetch(`/api/tree/${treeId}/ops`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'X-Muti-Actor': meName() },
+    body: JSON.stringify({ ops })
+  });
 }
 
 /* Rename a provisional id to the one the server minted, everywhere it is
