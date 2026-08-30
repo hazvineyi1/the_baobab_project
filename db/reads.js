@@ -255,4 +255,4 @@ async function trigramAvailable(pool) {
   return trgmCache;
 }
 
-module.exports = { bootstrap, changesSince, search, headSeq, familyContext };
+module.exports = { bootstrap, changesSince, search, headSeq, familyContext, trigramAvailable };

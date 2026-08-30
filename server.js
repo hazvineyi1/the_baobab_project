@@ -15,6 +15,7 @@ const path = require('path');
 const { createPool } = require('./db/pool');
 const { migrate } = require('./db/migrate');
 const treeRoutes = require('./routes/tree');
+const { trigramAvailable } = require('./db/reads');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -57,6 +58,7 @@ async function setupDatabase() {
     `);
 
     console.log('Connected to Postgres — shared family-tree data will persist.');
+    await reportSearchMode(pool);
     await warnIfBlobApiIsNowDangerous(pool);
 
     db = {
@@ -98,6 +100,21 @@ async function setupDatabase() {
       }
     };
   }
+}
+
+// 002_search degrades to prefix-only matching if the host forbids CREATE
+// EXTENSION. That is the right behaviour — a search feature is not worth
+// refusing to boot over — but it must not be SILENT: without this line, a
+// deployment where "Garikayi" stops finding Garikai looks like a bug in the
+// data rather than a missing extension.
+async function reportSearchMode(pool) {
+  try {
+    const fuzzy = await trigramAvailable(pool);
+    console.log(fuzzy
+      ? 'Search: prefix + fuzzy (pg_trgm active).'
+      : 'Search: prefix only — pg_trgm is not available on this host, so ' +
+        'misspelled names will not match.');
+  } catch { /* never block boot on a diagnostic */ }
 }
 
 // Once a tree has been migrated, the blob and the tables are two copies of the
