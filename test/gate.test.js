@@ -97,6 +97,17 @@ const cookieFrom = res => {
   eq('and the API answers',
      (await req(guarded, { path: '/api/tree/x/tree', cookie: good })).status, 200);
 
+  section('a space a phone added is not a wrong passphrase');
+  // Multi-word passphrases get autocorrected on phones, and the family would
+  // have no way to tell a trailing space from a wrong word.
+  for (const typed of [PASS + ' ', ' ' + PASS, '  ' + PASS + '  ', PASS + '\n']){
+    const t = await req(guarded, { method:'POST', path:'/gate', body:{ passphrase: typed } });
+    eq(`"${typed.replace(/\n/g, '\\n')}" is accepted`, t.status, 303);
+  }
+  check('but a space in the MIDDLE still matters',
+        (await req(guarded, { method:'POST', path:'/gate',
+                              body:{ passphrase: PASS.replace('-', ' - ') } })).status === 401);
+
   section('a wrong passphrase says only that it is wrong');
   r = await req(guarded, { method: 'POST', path: '/gate', body: { passphrase: 'wrong' } });
   eq('refused', r.status, 401);
@@ -116,6 +127,12 @@ const cookieFrom = res => {
   eq('and one signed with a different passphrase',
      (await req(guarded, { path: '/', cookie: `${COOKIE}=${_internals.issue('something else')}` })).status,
      401);
+
+  section('a stray space in the environment variable locks nobody out');
+  const padded = await listen(appWith({ passphrase: '  ' + PASS + '  ', hasDatabase: true }));
+  eq('the passphrase still opens it',
+     (await req(padded, { method:'POST', path:'/gate', body:{ passphrase: PASS } })).status, 303);
+  padded.close();
 
   section('changing the passphrase ends every session');
   const rotated = await listen(appWith({ passphrase: 'a-new-passphrase', hasDatabase: true }));

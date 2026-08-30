@@ -44,7 +44,14 @@ const SESSION_DAYS = 30;
 const MAX_ATTEMPTS = 10;
 const WINDOW_MS = 15 * 60 * 1000;
 
-const sha256 = s => crypto.createHash('sha256').update(String(s), 'utf8').digest();
+// Whitespace at either end is not part of anybody's passphrase, and it is
+// what phone keyboards add: a multi-word passphrase autocorrected on a phone
+// arrives with a trailing space more often than not, and the family would have
+// no way of telling that from a wrong passphrase. Trimmed on both sides, so a
+// stray space in the environment variable cannot lock everybody out either.
+const normalise = s => String(s == null ? '' : s).trim();
+
+const sha256 = s => crypto.createHash('sha256').update(normalise(s), 'utf8').digest();
 
 // Equal-length digests, compared in constant time. Hashing first means the
 // comparison never depends on the length of either input.
@@ -179,7 +186,7 @@ function unconfiguredPage() {
    local `npm start` case: nothing to protect and nobody to protect it from.
    With a database and no passphrase it fails closed. */
 function gate({ passphrase, hasDatabase, log = console.log } = {}) {
-  const secret = String(passphrase || '');
+  const secret = normalise(passphrase);
 
   if (!secret) {
     if (hasDatabase) {
@@ -212,7 +219,7 @@ function gate({ passphrase, hasDatabase, log = console.log } = {}) {
                          status: 429 });
         return res.status(p.status).type('html').send(p.html);
       }
-      const given = (req.body && req.body.passphrase) || '';
+      const given = normalise(req.body && req.body.passphrase);
       if (given && sameSecret(given, secret)) {
         attempts.delete(addr);
         res.cookie(COOKIE, issue(secret), {
