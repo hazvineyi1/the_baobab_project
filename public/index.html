@@ -1325,7 +1325,114 @@ function duplicatePairs(threshold){
   }
   return out.sort((x, y) => y.score - x.score);
 }
-const likelyDuplicates = () => duplicatePairs().filter(d => d.strong || d.score >= 0.75);
+/* Likely, as opposed to merely possible: a positional signal, or a score high
+   enough that the name alone cannot have got it there. One definition, used by
+   the chip, the panel and the cache below — db/duplicates.js has the same rule
+   under the same name, and test/parity.test.js keeps them in step. */
+const isLikelyPair = d => d.strong || d.score >= 0.75;
+const likelyDuplicates = () => duplicatePairs().filter(isLikelyPair);
+
+/* ── the scan, and why it is no longer on the render path ─────────────────
+
+   duplicatePairs() above compares every person to every other one, and each
+   comparison walks the unions. That is correct and it is the reference the
+   server's blocked version is tested against (test/parity.test.js) — but it
+   was being called from inside render(), on every redraw. Measured on this
+   tree: 200 people 1.0s, 400 5.5s, 800 35s, 1600 258s. Per frame.
+
+   So render() no longer scans. It paints a cached answer, and the answer is
+   worked out here: asked of the server, which blocks candidates into buckets
+   and does it in milliseconds, and only computed in the browser when there is
+   no server to ask.
+
+   Nothing about the SCORING changes. The server runs the same weights — that
+   is what the parity suite exists to keep true — and the exhaustive scan above
+   is untouched, so it goes on being the reference that proves the server's
+   blocking misses nothing. */
+
+const DUPES_THRESHOLD = 0.5;
+
+// Above this, an in-browser scan is a freeze rather than a wait. Only ever
+// reached with no server to ask, which is the local `npm start` case.
+const DUPES_LOCAL_MAX = 300;
+
+let dupes = { pairs: [], likely: [], from: 'none', scanning: false, tooBig: false };
+let dupesTimer = null;
+// Rises on every request, so a slow answer that arrives after a newer one has
+// already landed is dropped rather than overwriting it.
+let dupesRun = 0;
+
+/* The tree changed. Ask again — after a pause, because this fires on every
+   keystroke's worth of saving and the answer is not needed that fast. */
+function duplicatesChanged(){
+  clearTimeout(dupesTimer);
+  dupesTimer = setTimeout(refreshDuplicates, 500);
+}
+
+function setDupes(pairs, from, tooBig){
+  dupes = {
+    pairs,
+    likely: pairs.filter(isLikelyPair),
+    from, scanning: false, tooBig: !!tooBig
+  };
+  paintDupeChip();
+}
+
+/* The only thing render() does about duplicates, and it does it from the
+   cache: read a number, set a word. */
+function paintDupeChip(){
+  const chip = $('dupes');
+  if (!chip) return;
+  const n = dupes.likely.length;
+  chip.hidden = !n;
+  chip.textContent = n === 1 ? '1 possible duplicate' : `${n} possible duplicates`;
+}
+
+/* The server hands back the two people as records; the panel here wants ids.
+
+   `strong` is not in the server's answer, and does not need to be: every place
+   this project uses it, it is ORed with `score >= 0.75` — which is exactly the
+   definition of the `likely` flag the server does send. */
+const dupeFromServer = d => ({
+  a: d.a.id, b: d.b.id, score: d.score, why: d.why || [],
+  against: d.against || [], strong: !!d.likely
+});
+
+async function refreshDuplicates(){
+  const run = ++dupesRun;
+  dupes.scanning = true;
+
+  if (store === 'shared' && treeId){
+    try {
+      const r = await fetch(
+        `/api/tree/${treeId}/duplicates?threshold=${DUPES_THRESHOLD}&limit=200`,
+        { headers:{ Accept:'application/json' } });
+      if (!r.ok) throw new Error('the server answered ' + r.status);
+      const d = await r.json();
+      if (run !== dupesRun) return;                 // a newer scan has landed
+      // Only pairs whose people this page actually holds. A scan that raced a
+      // merge could name somebody who has since been folded away, and the
+      // panel would then read a name off nothing.
+      setDupes((d.pairs || []).map(dupeFromServer)
+                 .filter(x => state.people[x.a] && state.people[x.b]), 'server');
+      return;
+    } catch (e) {
+      // Fall through and do it here. A tree the server cannot scan is still a
+      // tree the family can be shown duplicates in.
+      if (run !== dupesRun) return;
+    }
+  }
+
+  if (run !== dupesRun) return;
+  if (people().length > DUPES_LOCAL_MAX){
+    // Said rather than silently skipped: an empty duplicates panel that means
+    // "not looked" reads exactly like one that means "none", and they are
+    // not the same answer.
+    setDupes([], 'local', true);
+    return;
+  }
+  setDupes(duplicatePairs(DUPES_THRESHOLD), 'local');
+}
 
 /* Candidates for a name being typed into the form. */
 function matchesForName(name, excludeId){
@@ -2147,10 +2254,8 @@ function render(){
 
   $('count').textContent = people().length;
   updateWho();
-  const likely = likelyDuplicates();
-  const chip = $('dupes');
-  chip.hidden = !likely.length;
-  chip.textContent = likely.length === 1 ? '1 possible duplicate' : `${likely.length} possible duplicates`;
+  // Reads the cached answer. It does NOT scan: see refreshDuplicates above.
+  paintDupeChip();
   // Not `people().length`: if everybody has been set aside the bar is the only
   // way back to their records, and hiding it would make a reversible act
   // unreversible.
@@ -2882,8 +2987,10 @@ function placeBackdrop(){
    the evidence, and two ways out — keep one, or say they really are two. */
 function openDuplicates(){
   closeForm();
-  const pairs = duplicatePairs();
-  const strongCount = pairs.filter(d => d.strong || d.score >= 0.75).length;
+  // The cache, not a scan. It is kept fresh by duplicatesChanged() on every
+  // load and every save, so opening this is a read.
+  const pairs = dupes.pairs;
+  const strongCount = dupes.likely.length;
   pending = { kind:'dupes', anchorId:sel || state.rootId };
 
   const el = document.createElement('div');
@@ -2891,11 +2998,16 @@ function openDuplicates(){
   el.className = 'wide';
   el.innerHTML =
     `<p class="cap">Possibly the same person</p>` +
+    (dupes.tooBig
+      ? `<p class="covnote">This tree is too large to check for duplicates in ` +
+        `the browser, and this page is not talking to a server. Nothing has ` +
+        `been checked — which is not the same as nothing being found.</p>`
+      : '') +
     (pairs.length ? pairs.map((d, i) => {
       const a = state.people[d.a], b = state.people[d.b];
       const line = q => `${q.born ? esc(q.born) + (q.died ? ' – ' + esc(q.died) : '') + ' · ' : ''}` +
         `${esc(positionOf(q.id))}`;
-      const strong = d.strong || d.score >= 0.75;
+      const strong = isLikelyPair(d);
       return `<div class="pair${strong ? '' : ' weak'}" data-i="${i}">` +
         `<p class="keepnote">${strong ? 'Very likely one person' : 'Same name — probably two people'}` +
         `<span>Keep which record?</span></p>` +
@@ -2922,13 +3034,15 @@ function openDuplicates(){
     mergePeople(keep, drop);
     closeForm(); render(); save();
     say(`${gone} folded into ${kept}. One record now.`);
-    if (duplicatePairs().length) openDuplicates();
+    // The merge changed the tree, so the standing answer is stale. Ask again,
+    // then re-open on what comes back rather than on what was there before.
+    refreshDuplicates().then(() => { if (dupes.pairs.length) openDuplicates(); });
   });
   el.querySelectorAll('[data-not]').forEach(btn => btn.onclick = () => {
     const [a, b] = btn.dataset.not.split('|');
     dismissDuplicate(a, b);
     closeForm(); render(); save();
-    if (duplicatePairs().length) openDuplicates();
+    refreshDuplicates().then(() => { if (dupes.pairs.length) openDuplicates(); });
   });
   $('dNo').onclick = closeForm;
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
@@ -4887,6 +5001,10 @@ function adopt(tree){
   if (meId && !state.people[meId]) meId = null;
   if (sel && !state.people[sel]) sel = null;
   history = [];              // undo cannot reach behind a shared refresh
+  // A whole tree has just arrived — from the first load, or from a refresh
+  // after somebody else's edit. Whatever was cached about duplicates was
+  // about a different tree.
+  duplicatesChanged();
 }
 
 /* ── what changed ────────────────────────────────────────────────────────
@@ -4995,6 +5113,9 @@ function save(){
   if (store === 'stalled') return;
   clearTimeout(timer);
   timer = setTimeout(flush, 400);
+  // The answer to "who might be the same person" is now stale. Asking is
+  // debounced separately and longer, so a burst of edits costs one scan.
+  duplicatesChanged();
 }
 
 async function flush(){
