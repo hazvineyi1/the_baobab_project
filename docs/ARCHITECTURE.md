@@ -251,15 +251,25 @@ per pair is quietly lying about it.
 
 | relationship | a man looking | a woman looking |
 |---|---|---|
-| father's sister | Tete | Tete **and** a sister |
-| father's sister's child | Muzukuru | Muzukuru **and** your child |
+| father's sister | Tete | Tete **and** Mukoma — a sister, same sex and senior |
+| father's sister's child | Muzukuru | **wholly** her child — not also Muzukuru |
+| father's sister's grandchild | Muzukuru | Muzukuru |
 | mother's brother | Sekuru | Sekuru |
 | mother's brother's son | Sekuru | Sekuru |
-| mother's brother's **daughter** | a mother (Amai) | a mother (Amai) |
-| mother's brother's wife | Ambuya **and** a wife | Ambuya |
+| mother's brother's **daughter** | Amai — a mother to you | Amai |
+| mother's brother's wife | Ambuya **and** Mukadzi | Ambuya |
 
-Two of those are corrections rather than additions: the engine returned *Sekuru*
-for a mother's brother's daughter, and had no word at all for his wife.
+Three of those are corrections rather than additions: the engine returned
+*Sekuru* for a mother's brother's daughter, had no word at all for his wife,
+and gave a woman *Muzukuru* for her father's sister's child.
+
+That last one is worth dwelling on, because it is where the system shows its
+coherence. To a woman her father's sister is a sister, so that sister's child
+is her child **completely** — and Muzukuru therefore moves down a generation,
+to the grandchild. A man reaches the same word for the same grandchild by a
+different route entirely, down the father's-sister skew. Two readings, one
+answer: that agreement is asserted in `test/kinship.test.js` and is the best
+evidence the rules are right.
 
 The structural facts are recomputed in `kinPath()` rather than read out of
 `relationship()`, so the original engine stays exactly as it was written and

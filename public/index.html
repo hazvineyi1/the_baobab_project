@@ -1278,19 +1278,26 @@ function overlaps(who, tid){
 
   if (p && p.fathersSister && me.sex === 'f'){
     if (p.genDiff === 1){
-      // She is Tete. To a woman she is also a sister — which is what makes
-      // her children yours in the line below.
+      // She is Tete, and to a woman she is also a sister — same sex, and
+      // senior, so Mukoma. That sisterhood is what makes her children yours
+      // in the line below.
       out.push({
         shape: 'overlap:fathers-sister:woman-looking:sister',
-        term: 'Mukoma', confirm: true,
-        why: "your father's sister — to a woman she is a sister as well as Tete"
+        term: 'Mukoma',
+        why: "your father's sister — to a woman she is a sister as well as Tete, " +
+             "and Mukoma because she is the same sex and senior"
       });
     }
     if (p.genDiff === 0){
+      // Completely a child, not a child as well as Muzukuru. She is your
+      // sister, so her children are yours in the full sense — which is why
+      // Muzukuru moves down a generation, to her grandchildren.
       out.push({
         shape: `overlap:fathers-sisters-child:woman-looking:${them.sex || 'unknown'}`,
         term: them.sex === 'f' ? 'Mwanasikana' : them.sex === 'm' ? 'Mwanakomana' : null,
-        why: "your father's sister is a sister to you, so her child is your child"
+        replaces: true,
+        why: "your father's sister is a sister to you, so her child is your child — " +
+             "wholly, not also Muzukuru"
       });
     }
   }
@@ -1314,7 +1321,7 @@ function overlaps(who, tid){
     if (me.sex === 'm'){
       out.push({
         shape: 'overlap:mothers-brothers-wife:man-looking:wife',
-        term: 'Mukadzi', confirm: true,
+        term: 'Mukadzi',
         why: 'to a man she is also a wife'
       });
     }

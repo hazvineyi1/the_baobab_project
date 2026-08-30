@@ -1,6 +1,9 @@
 // Minimal test harness. No framework — the app has two runtime dependencies
 // and it is worth keeping it that way.
 
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
 const { createPool } = require('../db/pool');
 const { migrate } = require('../db/migrate');
 
@@ -54,4 +57,66 @@ function report() {
   process.exit(failed ? 1 : 0);
 }
 
-module.exports = { check, eq, rejects, section, freshPool, newTree, report };
+// ── run the frontend's own code, whole, in a stubbed DOM ──────────────────
+//
+// Not an extract of it: the entire <script> from the shipped page, evaluated
+// against a stand-in for the browser. Testing a copied fragment would only
+// prove the fragment agrees with itself, and any drift in index.html would go
+// unnoticed. This way the functions under test are literally the ones the
+// family's browsers run.
+function loadFrontend(){
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  let src = html.split('<script>')[1].split('</script>')[0];
+
+  // The page kicks itself off by loading the shared tree and painting it.
+  // Everything after that is what we want to call directly, so the boot line
+  // is the one statement that has to go.
+  src = src.replace(/\nload\(\);\s*$/, '\n/* boot skipped under test */\n');
+  if (/\nload\(\);/.test(src)) throw new Error('frontend boot call was not neutralised');
+
+  // A DOM stand-in that absorbs whatever the page does to it. It is never
+  // inspected — the tests only call the pure model and scoring functions —
+  // so it just has to be permissive enough that top-level wiring runs.
+  const node = () => new Proxy(function(){}, {
+    get(t, k){
+      if (k === 'style' || k === 'classList' || k === 'dataset') return node();
+      if (k === 'children' || k === 'rows') return [];
+      if (k === Symbol.toPrimitive || k === 'toString') return () => '';
+      if (k === 'length') return 0;
+      return node();
+    },
+    set(){ return true; },
+    apply(){ return node(); }
+  });
+
+  const sandbox = {
+    console,
+    document: { getElementById: node, createElement: node, querySelector: node,
+                querySelectorAll: () => [], body: node(),
+                documentElement: { dataset: {} } },
+    addEventListener(){}, removeEventListener(){},
+    innerWidth: 1280, innerHeight: 800,
+    setTimeout, clearTimeout, Math, JSON, Date, Set, Map, Object, Array, String, Number,
+    localStorage: { getItem: () => null, setItem(){}, removeItem(){} },
+    fetch: () => Promise.reject(new Error('offline under test')),
+    confirm: () => false
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(src + `
+    this.api = {
+      sameness, duplicatePairs, likelyDuplicates, generations, nameTokens,
+      nameSimilarity, mustBeDifferent, birthYear, parentUnionOf, partnersOf,
+      relationship, kinTerms, kinPath, overlaps, grow, addPerson, addUnion,
+      teachTerm, forgetTerm, lexicon,
+      setState(s){ state = s; }, getState(){ return state; }
+    };`, sandbox);
+  if (typeof sandbox.api.sameness !== 'function'){
+    throw new Error('the frontend script did not expose sameness()');
+  }
+  return sandbox.api;
+}
+
+
+module.exports = { check, eq, rejects, section, freshPool, newTree, report, loadFrontend };
