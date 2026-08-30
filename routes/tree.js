@@ -5,6 +5,7 @@
 
 const express = require('express');
 const { applyOps } = require('../db/ops');
+const { bootstrap, changesSince, search } = require('../db/reads');
 const { OpError } = require('../db/errors');
 
 function sendError(res, e) {
@@ -68,6 +69,32 @@ module.exports = function treeRoutes(pool) {
       const ops = Array.isArray(req.body) ? req.body : req.body?.ops;
       const result = await applyOps(pool, req.params.id, ops, actorOf(req));
       res.json(result);
+    } catch (e) { sendError(res, e); }
+  });
+
+  // The neighbourhood around one person, not the whole tree. This is the call
+  // that has to stay fast as the tree grows — the client shows one corner of
+  // the family, so it should load one corner of the family.
+  r.get('/tree/:id/bootstrap', async (req, res) => {
+    try {
+      res.json(await bootstrap(pool, req.params.id, {
+        focus: req.query.focus || null,
+        depth: req.query.depth ?? 3
+      }));
+    } catch (e) { sendError(res, e); }
+  });
+
+  // Incremental sync. The client holds a seq and asks for what it is missing,
+  // rather than re-fetching a tree it already mostly has.
+  r.get('/tree/:id/changes', async (req, res) => {
+    try {
+      res.json(await changesSince(pool, req.params.id, req.query.since, req.query.limit));
+    } catch (e) { sendError(res, e); }
+  });
+
+  r.get('/tree/:id/search', async (req, res) => {
+    try {
+      res.json(await search(pool, req.params.id, req.query.q, { limit: req.query.limit }));
     } catch (e) { sendError(res, e); }
   });
 
