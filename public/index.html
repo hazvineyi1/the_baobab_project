@@ -53,6 +53,162 @@
   --lift:0 10px 32px rgba(0,0,0,.7);
 }
 
+
+/* ── palettes ────────────────────────────────────────────────────────────
+   The colours above are the default — parchment and antique brass, the
+   Baobab look the project was designed around. What follows are the other
+   four, each a complete set of the same tokens in both light and dark.
+
+   Two axes, deliberately kept separate: [data-theme] decides light or dark
+   (or follows the device when unset), [data-palette] decides which colours.
+   Somebody who wants a dark screen should not have to give up the colour
+   they chose, and somebody who likes the greys should still get them light
+   in the morning and dark at night.
+
+   Specificity is what makes that work, so it is worth stating rather than
+   leaving to be rediscovered:
+
+     :root                                          (0,1,0)  default light
+     :root[data-palette=P]                          (0,2,0)  palette light
+     :root:not([data-theme=light])                  (0,2,0)  default dark
+     :root[data-palette=P]:not([data-theme=light])  (0,3,0)  palette dark
+     :root[data-palette=P][data-theme=dark]         (0,3,0)  palette, forced
+
+   Every palette dark rule outranks every light rule, so a palette can be
+   declared after the defaults without its light values leaking into dark
+   mode. Each palette therefore has to define BOTH modes in full — a palette
+   missing a token would wear the previous palette's colour for it, which is
+   the one failure this arrangement can still produce. Generated from a table
+   with that check in it rather than written out by hand.
+
+   Any colour added here must clear two pairings the layout depends on:
+   --leaf carries --sky as its text (the relationship ribbon), and --gold
+   carries --pod (a taught term). */
+
+/* Stone */
+:root[data-palette="stone"]{
+  --sky:#F4F4F5; --sky-far:#E4E4E7; --soil:#C8C9CC;
+  --soil-deep:#A7A9AD; --horizon:#8A8D93; --bark:#5C6067;
+  --bark-lit:#7C8188; --bark-dark:#3E4147; --bark-thin:#767A81;
+  --root:#65696F; --pod:#FFFFFF; --pod-edge:#C7C9CE;
+  --pod-hi:#EDEDEF; --ink:#16181B; --muted:#61656C;
+  --gold:#2F3338; --gold-soft:#585D64; --leaf:#2A2D32;
+  --shadow:0 2px 10px rgba(16,18,20,.13); --lift:0 10px 30px rgba(16,18,20,.22);
+}
+@media (prefers-color-scheme: dark){
+  :root[data-palette="stone"]:not([data-theme="light"]){
+    --sky:#0B0C0E; --sky-far:#141619; --soil:#0A0B0C;
+    --soil-deep:#050506; --horizon:#3A3E44; --bark:#787D85;
+    --bark-lit:#9AA0A8; --bark-dark:#4A4E55; --bark-thin:#666B72;
+    --root:#6E737A; --pod:#17191D; --pod-edge:#343840;
+    --pod-hi:#101216; --ink:#EDEEF0; --muted:#93979E;
+    --gold:#C9CDD3; --gold-soft:#E4E7EA; --leaf:#B9BEC5;
+    --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.72);
+  }
+}
+:root[data-palette="stone"][data-theme="dark"]{
+  --sky:#0B0C0E; --sky-far:#141619; --soil:#0A0B0C;
+  --soil-deep:#050506; --horizon:#3A3E44; --bark:#787D85;
+  --bark-lit:#9AA0A8; --bark-dark:#4A4E55; --bark-thin:#666B72;
+  --root:#6E737A; --pod:#17191D; --pod-edge:#343840;
+  --pod-hi:#101216; --ink:#EDEEF0; --muted:#93979E;
+  --gold:#C9CDD3; --gold-soft:#E4E7EA; --leaf:#B9BEC5;
+  --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.72);
+}
+
+/* Msasa */
+:root[data-palette="msasa"]{
+  --sky:#F5EEE9; --sky-far:#E8DCD3; --soil:#CDAF9B;
+  --soil-deep:#A9866E; --horizon:#8E6A52; --bark:#6E5343;
+  --bark-lit:#8C6D59; --bark-dark:#4C382C; --bark-thin:#876956;
+  --root:#7A5A44; --pod:#FDF8F5; --pod-edge:#C9AE9C;
+  --pod-hi:#F3E7DF; --ink:#241812; --muted:#6E5A4E;
+  --gold:#9C3D1E; --gold-soft:#C2603A; --leaf:#4A5B33;
+  --shadow:0 2px 10px rgba(36,24,18,.15); --lift:0 10px 30px rgba(36,24,18,.25);
+}
+@media (prefers-color-scheme: dark){
+  :root[data-palette="msasa"]:not([data-theme="light"]){
+    --sky:#100A08; --sky-far:#1A100C; --soil:#0D0806;
+    --soil-deep:#060302; --horizon:#5A3A26; --bark:#9A7358;
+    --bark-lit:#BE9375; --bark-dark:#6A4E3C; --bark-thin:#7E5D46;
+    --root:#8A6549; --pod:#1C1310; --pod-edge:#3E2E26;
+    --pod-hi:#150E0C; --ink:#F3E6DC; --muted:#A08A7C;
+    --gold:#E0733F; --gold-soft:#F09A6B; --leaf:#93A46B;
+    --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.74);
+  }
+}
+:root[data-palette="msasa"][data-theme="dark"]{
+  --sky:#100A08; --sky-far:#1A100C; --soil:#0D0806;
+  --soil-deep:#060302; --horizon:#5A3A26; --bark:#9A7358;
+  --bark-lit:#BE9375; --bark-dark:#6A4E3C; --bark-thin:#7E5D46;
+  --root:#8A6549; --pod:#1C1310; --pod-edge:#3E2E26;
+  --pod-hi:#150E0C; --ink:#F3E6DC; --muted:#A08A7C;
+  --gold:#E0733F; --gold-soft:#F09A6B; --leaf:#93A46B;
+  --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.74);
+}
+
+/* Miombo */
+:root[data-palette="miombo"]{
+  --sky:#EDF0E8; --sky-far:#DCE2D3; --soil:#BDC2A8;
+  --soil-deep:#98A084; --horizon:#7C8768; --bark:#57604A;
+  --bark-lit:#757F64; --bark-dark:#3A4231; --bark-thin:#6F7A5E;
+  --root:#5F6B4A; --pod:#FAFCF6; --pod-edge:#B7C0A4;
+  --pod-hi:#EBF0E2; --ink:#182015; --muted:#5B6552;
+  --gold:#33632C; --gold-soft:#4C8442; --leaf:#2B3A24;
+  --shadow:0 2px 10px rgba(24,32,21,.14); --lift:0 10px 30px rgba(24,32,21,.24);
+}
+@media (prefers-color-scheme: dark){
+  :root[data-palette="miombo"]:not([data-theme="light"]){
+    --sky:#080B08; --sky-far:#101610; --soil:#070906;
+    --soil-deep:#030402; --horizon:#37452F; --bark:#77835F;
+    --bark-lit:#98A57E; --bark-dark:#4C563C; --bark-thin:#5F6B4B;
+    --root:#6B7852; --pod:#131811; --pod-edge:#2C3628;
+    --pod-hi:#0E120D; --ink:#E8EEDF; --muted:#8E9884;
+    --gold:#8FC57F; --gold-soft:#B4DCA6; --leaf:#A9C293;
+    --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.72);
+  }
+}
+:root[data-palette="miombo"][data-theme="dark"]{
+  --sky:#080B08; --sky-far:#101610; --soil:#070906;
+  --soil-deep:#030402; --horizon:#37452F; --bark:#77835F;
+  --bark-lit:#98A57E; --bark-dark:#4C563C; --bark-thin:#5F6B4B;
+  --root:#6B7852; --pod:#131811; --pod-edge:#2C3628;
+  --pod-hi:#0E120D; --ink:#E8EEDF; --muted:#8E9884;
+  --gold:#8FC57F; --gold-soft:#B4DCA6; --leaf:#A9C293;
+  --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.72);
+}
+
+/* Indigo */
+:root[data-palette="indigo"]{
+  --sky:#EDEFF5; --sky-far:#DCE0EB; --soil:#B8BFD1;
+  --soil-deep:#949DB4; --horizon:#78829B; --bark:#4E5670;
+  --bark-lit:#6C7590; --bark-dark:#343A4D; --bark-thin:#666F88;
+  --root:#565F79; --pod:#FBFCFF; --pod-edge:#B9C0D2;
+  --pod-hi:#E9ECF4; --ink:#141826; --muted:#565E75;
+  --gold:#2E3E86; --gold-soft:#4C5FB0; --leaf:#2A3352;
+  --shadow:0 2px 10px rgba(20,24,38,.14); --lift:0 10px 30px rgba(20,24,38,.24);
+}
+@media (prefers-color-scheme: dark){
+  :root[data-palette="indigo"]:not([data-theme="light"]){
+    --sky:#070910; --sky-far:#0E1119; --soil:#06080E;
+    --soil-deep:#030407; --horizon:#333C5A; --bark:#6E789A;
+    --bark-lit:#8F99BB; --bark-dark:#454D69; --bark-thin:#5A6382;
+    --root:#626C8E; --pod:#12151F; --pod-edge:#2B3247;
+    --pod-hi:#0D1017; --ink:#E6E9F4; --muted:#8D94A9;
+    --gold:#8FA0E8; --gold-soft:#B3BFF3; --leaf:#AAB4DA;
+    --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.72);
+  }
+}
+:root[data-palette="indigo"][data-theme="dark"]{
+  --sky:#070910; --sky-far:#0E1119; --soil:#06080E;
+  --soil-deep:#030407; --horizon:#333C5A; --bark:#6E789A;
+  --bark-lit:#8F99BB; --bark-dark:#454D69; --bark-thin:#5A6382;
+  --root:#626C8E; --pod:#12151F; --pod-edge:#2B3247;
+  --pod-hi:#0D1017; --ink:#E6E9F4; --muted:#8D94A9;
+  --gold:#8FA0E8; --gold-soft:#B3BFF3; --leaf:#AAB4DA;
+  --shadow:0 2px 12px rgba(0,0,0,.6); --lift:0 10px 32px rgba(0,0,0,.72);
+}
+
 *{box-sizing:border-box;}
 [hidden]{display:none !important;}
 html,body{height:100%;}
@@ -535,6 +691,28 @@ body{
   box-shadow:inset 0 0 0 1.5px var(--gold-soft);
 }
 #bar button.notice:hover{color:var(--gold);}
+/* The palette chooser. Each row shows the three colours that carry a
+   palette's character — sky, bark, accent — in the light or dark face you
+   would actually get, so the choice is visible before it is made. */
+#form .pals{display:flex; flex-direction:column; gap:5px;}
+#form .pal{
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:7px 9px; border-radius:12px 4px 12px 4px; cursor:pointer;
+  background:var(--pod); border:1.5px solid var(--pod-edge); text-align:left;
+}
+#form .pal:hover{border-color:var(--gold-soft); background:var(--pod-hi);}
+#form .pal.on{border-color:var(--gold); border-width:2px; padding:6.5px 8.5px;}
+#form .pal .chips{display:flex; flex:none; border-radius:999px; overflow:hidden;
+  box-shadow:inset 0 0 0 1px rgba(128,128,128,.28);}
+#form .pal .chips i{display:block; width:15px; height:22px;}
+#form .pal u{
+  display:block; text-decoration:none; font-family:'Karla',sans-serif;
+  font-size:12.5px; font-weight:700; color:var(--ink); line-height:1.35;
+}
+#form .pal u small{
+  display:block; font-weight:400; font-size:11px; color:var(--muted); margin-top:1px;
+}
+
 /* A row in a panel that is information rather than a button. */
 #form .askrow.static{cursor:default;}
 #form .askrow.static:hover{background:var(--pod);}
@@ -637,7 +815,7 @@ body{
   <button id="fit">Fit</button>
   <button id="undo">Undo</button>
   <button id="clear">Clear</button>
-  <button class="who" id="theme" title="Day, night, or follow this device">Auto</button>
+  <button class="who" id="look" title="Light or dark, and which colours">Baobab</button>
   <button class="who" id="who">You: <b>—</b></button>
   <button class="who" id="roots">Roots</button>
   <button class="who" id="aside" hidden></button>
@@ -3919,42 +4097,126 @@ function kinshipCoverage(budget){
    want and what the page did before this existed; the other two override it,
    for a bright room with a dark system setting or the reverse. */
 const THEME_KEY = 'muti-baobab-theme';
+const PALETTE_KEY = 'muti-baobab-palette';
+
 const THEMES = [
-  { v: '',      label: 'Auto'  },
-  { v: 'light', label: 'Day'   },
-  { v: 'dark',  label: 'Night' }
+  { v: '',      label: 'Auto',  note: 'follows this device' },
+  { v: 'light', label: 'Day',   note: 'always light' },
+  { v: 'dark',  label: 'Night', note: 'always dark' }
 ];
 
-function applyTheme(v){
+/* The swatch colours are quoted from the CSS above rather than read back off
+   the page, because a swatch has to show a palette you are NOT currently
+   wearing — you cannot ask the browser for the value of a variable that is
+   not applied. They are the three that carry a palette's character: the sky
+   behind the tree, the bark of it, and the accent. */
+const PALETTES = [
+  { v:'',       label:'Baobab', note:'parchment and antique brass',
+    swatch:['#EFEAE0', '#6F5F49', '#8A5A16'], dark:['#0B0E13', '#8B7A5F', '#D9A441'] },
+  { v:'stone',  label:'Stone',  note:'black, grey and white',
+    swatch:['#F4F4F5', '#5C6067', '#2F3338'], dark:['#0B0C0E', '#787D85', '#C9CDD3'] },
+  { v:'msasa',  label:'Msasa',  note:'the copper of new leaves',
+    swatch:['#F5EEE9', '#6E5343', '#9C3D1E'], dark:['#100A08', '#9A7358', '#E0733F'] },
+  { v:'miombo', label:'Miombo', note:'woodland green',
+    swatch:['#EDF0E8', '#57604A', '#33632C'], dark:['#080B08', '#77835F', '#8FC57F'] },
+  { v:'indigo', label:'Indigo', note:'deep blue, formal',
+    swatch:['#EDEFF5', '#4E5670', '#2E3E86'], dark:['#070910', '#6E789A', '#8FA0E8'] }
+];
+
+const readPref = (key, list) => {
+  let v = '';
+  try { v = localStorage.getItem(key) || ''; } catch (e) {}
+  return list.some(x => x.v === v) ? v : '';
+};
+const writePref = (key, v) => {
+  try { v ? localStorage.setItem(key, v) : localStorage.removeItem(key); }
+  catch (e) {}
+};
+
+function applyLook(theme, palette){
   const root = document && document.documentElement;
   if (!root || !root.dataset) return;
-  if (v) root.dataset.theme = v; else delete root.dataset.theme;
-  const btn = $('theme');
+  if (theme) root.dataset.theme = theme; else delete root.dataset.theme;
+  if (palette) root.dataset.palette = palette; else delete root.dataset.palette;
+  const btn = $('look');
   if (btn && btn.classList){
-    const t = THEMES.find(x => x.v === v) || THEMES[0];
-    btn.textContent = t.label;
-    btn.classList.toggle('set', !!v);
+    const p = PALETTES.find(x => x.v === palette) || PALETTES[0];
+    btn.textContent = p.label;
+    btn.classList.toggle('set', !!(theme || palette));
   }
 }
 
+/* Applied before the first paint, so the page never flashes one look and
+   then another. */
 function loadTheme(){
-  let v = '';
-  try { v = localStorage.getItem(THEME_KEY) || ''; } catch (e) {}
-  if (!THEMES.some(t => t.v === v)) v = '';
-  applyTheme(v);
+  applyLook(readPref(THEME_KEY, THEMES), readPref(PALETTE_KEY, PALETTES));
 }
 
-function cycleTheme(){
-  let cur = '';
-  try { cur = localStorage.getItem(THEME_KEY) || ''; } catch (e) {}
-  const next = THEMES[(THEMES.findIndex(t => t.v === cur) + 1) % THEMES.length];
-  try {
-    if (next.v) localStorage.setItem(THEME_KEY, next.v);
-    else localStorage.removeItem(THEME_KEY);
-  } catch (e) {}
-  applyTheme(next.v);
-  say(next.v === '' ? 'Following this device.' :
-      next.v === 'light' ? 'Day.' : 'Night.');
+// Is the page dark right now? Decides which face of each swatch to show, so
+// the choices on screen are the colours you would actually get.
+function nowDark(){
+  const t = readPref(THEME_KEY, THEMES);
+  if (t) return t === 'dark';
+  try { return matchMedia('(prefers-color-scheme: dark)').matches; }
+  catch (e) { return false; }
+}
+
+/* Choosing how the tree looks. A panel rather than a button that cycles:
+   five palettes and three light settings is thirteen taps to get back to
+   where you started, and you cannot see what you are choosing until you have
+   chosen it. */
+function openLook(){
+  closeForm();
+  pending = { kind:'dupes', anchorId: sel || state.rootId };
+  const el = document.createElement('div');
+  el.id = 'form';
+  document.body.appendChild(el);
+
+  const draw = () => {
+    const theme = readPref(THEME_KEY, THEMES);
+    const pal = readPref(PALETTE_KEY, PALETTES);
+    const dark = nowDark();
+    el.innerHTML =
+      `<p class="cap">How the tree looks</p>` +
+      `<p class="lbl">Light</p>` +
+      `<div class="seg" id="lookTheme">` +
+        THEMES.map(t => `<button type="button" data-theme="${t.v}" ` +
+          `aria-pressed="${t.v === theme}" title="${esc(t.note)}">${t.label}</button>`).join('') +
+      `</div>` +
+      `<p class="lbl" style="margin-top:14px;">Colours</p>` +
+      `<div class="pals">` +
+        PALETTES.map(p => {
+          const c = dark ? p.dark : p.swatch;
+          return `<button type="button" class="pal${p.v === pal ? ' on' : ''}" ` +
+            `data-palette="${p.v}" aria-pressed="${p.v === pal}">` +
+            `<span class="chips">` +
+              c.map(x => `<i style="background:${x}"></i>`).join('') +
+            `</span>` +
+            `<u>${p.label}<small>${esc(p.note)}</small></u></button>`;
+        }).join('') +
+      `</div>` +
+      `<div class="row"><button class="btn" id="lookNo">Done</button></div>`;
+    placeForm(el);
+
+    el.querySelectorAll('[data-theme]').forEach(b => b.onclick = () => {
+      writePref(THEME_KEY, b.dataset.theme);
+      applyLook(b.dataset.theme, readPref(PALETTE_KEY, PALETTES));
+      draw();                       // the swatches show the other face now
+      say(b.dataset.theme === '' ? 'Following this device.'
+        : b.dataset.theme === 'light' ? 'Day.' : 'Night.');
+    });
+    el.querySelectorAll('[data-palette]').forEach(b => b.onclick = () => {
+      writePref(PALETTE_KEY, b.dataset.palette);
+      applyLook(readPref(THEME_KEY, THEMES), b.dataset.palette);
+      draw();
+      const p = PALETTES.find(x => x.v === b.dataset.palette) || PALETTES[0];
+      say(`${p.label} — ${p.note}.`);
+    });
+    $('lookNo').onclick = closeForm;
+  };
+
+  draw();
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
 /* Who is holding the phone. This never goes into the shared tree — each
@@ -4173,7 +4435,7 @@ $('who').onclick = () => {
 };
 
 $('dupes').onclick = openDuplicates;
-$('theme').onclick = cycleTheme;
+$('look').onclick = openLook;
 $('kin').onclick = openKinship;
 $('roots').onclick = openRoots;
 // A full reload rather than a re-fetch: the page has been sitting there

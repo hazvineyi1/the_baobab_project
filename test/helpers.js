@@ -117,6 +117,7 @@ function loadFrontend(){
       frontier, isOpenEnd, descendantsOf, toggleRoot,
       setAside, restore, noticesFor, asidePeople, present, mergePeople, meName,
       knownTotem, totemKey, totemsHere, totemSuggestions, MITUPO,
+      PALETTES, THEMES,
       diffOps, remapId, familyLink,
       setMe(id){ meId = id; },
       setState(s){ state = s; }, getState(){ return state; }
