@@ -423,6 +423,8 @@ body{
   padding:7px 13px; border-radius:999px; border:1.5px solid var(--pod-edge);
   color:var(--muted); font-weight:600; cursor:pointer; white-space:nowrap;
 }
+#bar #theme{font-variant-numeric:tabular-nums; min-width:74px; text-align:center;}
+#bar #theme.set{border-color:var(--gold-soft); color:var(--gold);}
 #bar .who b{color:var(--leaf); font-weight:700;}
 #bar .who.active{background:var(--leaf); border-color:var(--leaf); color:var(--sky);}
 #bar .who.active b{color:var(--sky);}
@@ -495,6 +497,7 @@ body{
   <button id="fit">Fit</button>
   <button id="undo">Undo</button>
   <button id="clear">Clear</button>
+  <button class="who" id="theme" title="Day, night, or follow this device">◐ Auto</button>
   <button class="who" id="who">You: <b>—</b></button>
   <button class="dupes" id="dupes" hidden></button>
   <span class="tally"><b id="count">0</b> in the tree</span>
@@ -1736,6 +1739,12 @@ const BG_PHOTO = {
   // photograph of one. `crown` caps how much of it may be lost.
   width: 0.95,
   crown: 0.62,        // at most this fraction of the tree may sit off-screen
+  // Stretched horizontally. A baobab is squat — the thing everyone recognises
+  // is a trunk far too fat for the tree standing on it — and photographs taken
+  // from a distance flatten exactly that. Widening the image thickens the
+  // trunk and broadens the crown together, which is the proportion the tree
+  // has in life rather than the one a lens gives it.
+  fatten: 1.34,
   // How hard the sky is cut away. Raise `cut` if the sky lingers as a haze;
   // lower it if fine branches are being eaten. `lift` sets how dark a pixel
   // has to be before it counts as tree at all.
@@ -1944,7 +1953,7 @@ function buildDrawnBackdrop(){
   let seed = 20260830 >>> 0;
   const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
 
-  const H = 330, BASE_W = 262, TOP_W = 104;
+  const H = 318, BASE_W = 330, TOP_W = 132;
   const left = bgTrunkProfile(rnd, -1, H, BASE_W, TOP_W);
   const right = bgTrunkProfile(rnd, 1, H, BASE_W, TOP_W);
   // Crossing the top with a straight line gave the trunk a flat lid and made
@@ -2061,16 +2070,17 @@ function placeBackdrop(){
     // Span the target width, then pull back if that would push more of the
     // crown off the top than `crown` allows — on a short, wide window the
     // width target alone would leave nothing but trunk.
-    const byWidth = (innerWidth * BG_PHOTO.width) / bgPhotoWidth;
+    const byWidth = (innerWidth * BG_PHOTO.width) / (bgPhotoWidth * BG_PHOTO.fatten);
     const cap = (innerHeight * 0.6 / (1 - BG_PHOTO.crown)) / bgPhotoAbove;
     scale = Math.min(byWidth, cap);
   } else {
     scale = Math.max(0.3, Math.min(1.5, (innerHeight * 0.86) / 900));
   }
   scale *= (1 + (pos.k - 1) * 0.2);
+  const fat = bgPhotoAbove ? BG_PHOTO.fatten : 1;
   g.setAttribute('transform',
     `translate(${(innerWidth / 2 + pos.x * 0.12).toFixed(1)} ${pos.y.toFixed(1)}) ` +
-    `scale(${scale.toFixed(3)})`);
+    `scale(${(scale * fat).toFixed(3)} ${scale.toFixed(3)})`);
 
   // How far the view has travelled below the horizon, which in this layout is
   // how far back through the ancestors you have gone.
@@ -2421,6 +2431,56 @@ function closeForm(){
 }
 const say = m => { $('live').textContent = m; };
 
+/* Day or night.
+ 
+   Which one somebody wants is not a property of the family tree, it is a
+   property of the person looking at it and the room they are sitting in. So
+   like `meId` and the zoom, it lives on the device and never reaches the
+   server: the same tree can be read at noon on a phone and at midnight on a
+   laptop, and each is right.
+ 
+   Three states, not two. "Auto" follows the device, which is what most people
+   want and what the page did before this existed; the other two override it,
+   for a bright room with a dark system setting or the reverse. */
+const THEME_KEY = 'muti-baobab-theme';
+const THEMES = [
+  { v: '',      label: '◐ Auto'  },
+  { v: 'light', label: '☀ Day'   },
+  { v: 'dark',  label: '☾ Night' }
+];
+
+function applyTheme(v){
+  const root = document && document.documentElement;
+  if (!root || !root.dataset) return;
+  if (v) root.dataset.theme = v; else delete root.dataset.theme;
+  const btn = $('theme');
+  if (btn && btn.classList){
+    const t = THEMES.find(x => x.v === v) || THEMES[0];
+    btn.textContent = t.label;
+    btn.classList.toggle('set', !!v);
+  }
+}
+
+function loadTheme(){
+  let v = '';
+  try { v = localStorage.getItem(THEME_KEY) || ''; } catch (e) {}
+  if (!THEMES.some(t => t.v === v)) v = '';
+  applyTheme(v);
+}
+
+function cycleTheme(){
+  let cur = '';
+  try { cur = localStorage.getItem(THEME_KEY) || ''; } catch (e) {}
+  const next = THEMES[(THEMES.findIndex(t => t.v === cur) + 1) % THEMES.length];
+  try {
+    if (next.v) localStorage.setItem(THEME_KEY, next.v);
+    else localStorage.removeItem(THEME_KEY);
+  } catch (e) {}
+  applyTheme(next.v);
+  say(next.v === '' ? 'Following this device.' :
+      next.v === 'light' ? 'Day.' : 'Night.');
+}
+
 /* Who is holding the phone. This never goes into the shared tree — each
    relative's own device remembers who they are, so the same tree reads
    differently, and correctly, for every one of them. */
@@ -2592,6 +2652,7 @@ $('who').onclick = () => {
 };
 
 $('dupes').onclick = openDuplicates;
+$('theme').onclick = cycleTheme;
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {
@@ -2667,6 +2728,8 @@ function save(){
 }
 
 pos = { x:innerWidth/2, y:innerHeight*0.6, k:1 };
+// Before anything paints, so the page never flashes the wrong one.
+loadTheme();
 buildBackdrop();
 load();
 </script>

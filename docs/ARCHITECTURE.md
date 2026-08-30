@@ -47,8 +47,13 @@ always.
 **Generation numbers.** Same reason. The duplicate scan computes them fresh in
 one pass and throws them away.
 
-**`meId`, zoom, pan, folded branches.** The tree is shared; the viewpoint is
-personal. These stay in `localStorage` and never reach the server.
+**`meId`, zoom, pan, folded branches, and day/night.** The tree is shared; the
+viewpoint is personal. These stay in `localStorage` and never reach the server.
+Which theme somebody wants is not a property of the family tree — it is a
+property of the person looking and the room they are sitting in, so the same
+tree can be read at noon on a phone and at midnight on a laptop, and each is
+right. The control has three states: Auto follows the device (the default and
+what the page did before), Day and Night override it.
 
 ## API
 
@@ -248,6 +253,15 @@ each reaching further down and drawing in narrower, revealed one after another
 as the view descends through the ancestors. One reflection would only be as
 deep as the crown is tall, and travelling further back would be rewarded with
 empty ground.
+
+### Proportion
+
+The image is stretched horizontally by `BG_PHOTO.fatten`. A baobab is squat —
+the thing everyone recognises is a trunk far too fat for the tree standing on
+it — and a photograph taken from a distance flattens exactly that. Widening
+thickens the trunk and broadens the crown together, which is the proportion
+the tree has in life rather than the one a lens gives it. The width target
+accounts for the stretch, so the two settings do not fight.
 
 ### Sizing
 

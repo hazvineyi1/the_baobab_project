@@ -51,7 +51,8 @@ function loadFrontend(){
   const sandbox = {
     console,
     document: { getElementById: node, createElement: node, querySelector: node,
-                querySelectorAll: () => [], body: node() },
+                querySelectorAll: () => [], body: node(),
+                documentElement: { dataset: {} } },
     addEventListener(){}, removeEventListener(){},
     innerWidth: 1280, innerHeight: 800,
     setTimeout, clearTimeout, Math, JSON, Date, Set, Map, Object, Array, String, Number,
