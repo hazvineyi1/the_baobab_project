@@ -6,6 +6,7 @@
 const express = require('express');
 const { applyOps } = require('../db/ops');
 const { bootstrap, changesSince, search } = require('../db/reads');
+const { findDuplicates } = require('../db/duplicates');
 const { OpError } = require('../db/errors');
 
 function sendError(res, e) {
@@ -95,6 +96,18 @@ module.exports = function treeRoutes(pool) {
   r.get('/tree/:id/search', async (req, res) => {
     try {
       res.json(await search(pool, req.params.id, req.query.q, { limit: req.query.limit }));
+    } catch (e) { sendError(res, e); }
+  });
+
+  // Duplicate candidates. Runs on the server, on demand — never inside a
+  // render. The old client scored every person against every other one on
+  // every frame, which at 3,000 people is 4.5 million comparisons per frame.
+  r.get('/tree/:id/duplicates', async (req, res) => {
+    try {
+      res.json(await findDuplicates(pool, req.params.id, {
+        threshold: req.query.threshold ? Number(req.query.threshold) : undefined,
+        limit: req.query.limit ? Number(req.query.limit) : undefined
+      }));
     } catch (e) { sendError(res, e); }
   });
 
