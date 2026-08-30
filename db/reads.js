@@ -9,6 +9,9 @@ const { badRequest, notFound } = require('./errors');
 
 const PERSON_COLS = `id, name, sex, totem, born, born_year, died, is_root,
                      added_by, aside_at, aside_by, aside_why, merged_into,
+                     visibility, visibility_by, visibility_at,
+                     mw_is_living(died, born_year) AS is_living,
+                     mw_is_public(visibility, died, born_year) AS is_public,
                      created_at, updated_at`;
 
 // Set-aside people are out of the tree everybody sees. They are never deleted,
@@ -16,6 +19,16 @@ const PERSON_COLS = `id, name, sex, totem, born, born_year, died, is_root,
 // forgets this clause is how a folded duplicate reappears as a duplicate of
 // the record it was folded into.
 const PRESENT = 'aside_at IS NULL';
+
+/* What the world may see. Written once and used by every public read, because
+   a read that forgets this clause publishes a living person, and that is the
+   one kind of bug that cannot be taken back. */
+const PUBLIC = `${PRESENT} AND mw_is_public(visibility, died, born_year)`;
+
+// Deliberately narrower than PERSON_COLS. A public reader gets what identifies
+// an ancestor and nothing else: no note of who recorded them, no set-aside
+// reason, no timestamps that would say when a family was working on them.
+const PUBLIC_COLS = `id, name, sex, totem, born, born_year, died, is_root`;
 
 // ---------------------------------------------------------------------------
 // bootstrap: the neighbourhood around one person.
@@ -349,6 +362,76 @@ async function fullTree(pool, treeId) {
   };
 }
 
+/* The tree as the world sees it.
+ 
+   A separate function rather than a flag on fullTree, and that is deliberate.
+   A boolean parameter on a read is one `if` away from serving the family's
+   view to a stranger, and the mistake is silent. Two functions cannot be
+   confused: this one has no way to return a private person.
+ 
+   Union lists are filtered to people who are actually being sent, so the
+   public graph never points at somebody it will not name. The shape of a
+   family stays visible — you can see that a public ancestor had children —
+   but a private living child is not there to be counted or inferred from. */
+async function publicTree(pool, treeId) {
+  const { rowCount } = await pool.query('SELECT 1 FROM trees WHERE id = $1', [treeId]);
+  if (!rowCount) throw notFound(`tree ${treeId} does not exist`);
+
+  const seq = await headSeq(pool, treeId);
+  const { rows: people } = await pool.query(
+    `SELECT ${PUBLIC_COLS} FROM people
+      WHERE tree_id = $1 AND ${PUBLIC} ORDER BY created_at`, [treeId]);
+
+  const here = new Set(people.map(p => p.id));
+  const { rows: unionRows } = await pool.query(`
+    SELECT u.id,
+           COALESCE((SELECT array_agg(up.person_id ORDER BY up.position)
+                       FROM union_partners up WHERE up.union_id = u.id), '{}') AS partners,
+           COALESCE((SELECT array_agg(uc.person_id ORDER BY uc.birth_order)
+                       FROM union_children uc WHERE uc.union_id = u.id), '{}') AS children
+      FROM unions u WHERE u.tree_id = $1 ORDER BY u.created_at`, [treeId]);
+
+  const unions = unionRows
+    .map(u => ({ id: u.id,
+                 partners: u.partners.filter(x => here.has(x)),
+                 children: u.children.filter(x => here.has(x)) }))
+    .filter(u => u.partners.length || u.children.length);
+
+  return { treeId, seq, people, unions, total: people.length };
+}
+
+/* One ancestor, for a page anybody can link to. Returns null rather than
+   throwing when the person is not public, so that "private" and "does not
+   exist" are indistinguishable from outside — an error that said "this person
+   exists but you may not see them" would confirm they exist. */
+async function publicPerson(pool, personId) {
+  const { rows } = await pool.query(
+    `SELECT ${PUBLIC_COLS}, tree_id FROM people
+      WHERE id = $1 AND ${PUBLIC}`, [personId]);
+  if (!rows.length) return null;
+  const person = rows[0];
+
+  // Parents and children, public ones only.
+  const [parents, children, partners] = await Promise.all([
+    pool.query(`SELECT ${PUBLIC_COLS} FROM people p
+                  JOIN union_partners up ON up.person_id = p.id
+                  JOIN union_children uc ON uc.union_id = up.union_id
+                 WHERE uc.person_id = $1 AND ${PUBLIC}`, [personId]),
+    pool.query(`SELECT ${PUBLIC_COLS} FROM people p
+                  JOIN union_children uc ON uc.person_id = p.id
+                  JOIN union_partners up ON up.union_id = uc.union_id
+                 WHERE up.person_id = $1 AND ${PUBLIC}
+                 ORDER BY uc.birth_order`, [personId]),
+    pool.query(`SELECT ${PUBLIC_COLS} FROM people p
+                  JOIN union_partners a ON a.person_id = p.id
+                  JOIN union_partners b ON b.union_id = a.union_id
+                                       AND b.person_id <> a.person_id
+                 WHERE b.person_id = $1 AND ${PUBLIC}`, [personId])
+  ]);
+  return { person, parents: parents.rows, children: children.rows,
+           partners: partners.rows };
+}
+
 /* Who has been set aside, and — when `recordedBy` is given — which of them
    were entered by that person.
 
@@ -386,5 +469,5 @@ async function setAsideList(pool, treeId, { recordedBy } = {}) {
   };
 }
 
-module.exports = { bootstrap, fullTree, changesSince, search, headSeq,
-                   familyContext, trigramAvailable, setAsideList };
+module.exports = { bootstrap, fullTree, publicTree, publicPerson, changesSince,
+                   search, headSeq, familyContext, trigramAvailable, setAsideList };

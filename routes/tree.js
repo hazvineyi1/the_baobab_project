@@ -5,7 +5,8 @@
 
 const express = require('express');
 const { applyOps } = require('../db/ops');
-const { bootstrap, fullTree, changesSince, search, setAsideList } = require('../db/reads');
+const { bootstrap, fullTree, publicTree, publicPerson, changesSince, search,
+        setAsideList } = require('../db/reads');
 const { findDuplicates } = require('../db/duplicates');
 const { findRelatives, linksFor } = require('../db/crosstree');
 const { OpError } = require('../db/errors');
@@ -222,6 +223,35 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
     try {
       const status = req.query.status ? String(req.query.status) : null;
       res.json({ treeId: req.params.id, links: await linksFor(pool, req.params.id, status) });
+    } catch (e) { sendError(res, e); }
+  });
+
+  return r;
+};
+
+/* The world's view: ancestors, and any living person who has chosen to be
+   published. Mounted on its own router so it can live OUTSIDE the passphrase
+   gate — a public record behind a passphrase is not a public record.
+ 
+   Nothing here takes a family key, and nothing here can reach a private
+   person: it calls publicTree/publicPerson, which have no parameter that
+   would let them. */
+module.exports.publicRoutes = function publicRoutes(pool) {
+  const r = express.Router();
+
+  r.get('/tree/:id', async (req, res) => {
+    try { res.json(await publicTree(pool, req.params.id)); }
+    catch (e) { sendError(res, e); }
+  });
+
+  r.get('/person/:id', async (req, res) => {
+    try {
+      const found = await publicPerson(pool, req.params.id);
+      // The same answer for "private" and "no such person". Anything else
+      // confirms that somebody exists, which is half of what was being kept
+      // back.
+      if (!found) return res.status(404).json({ error: 'not_found' });
+      res.json(found);
     } catch (e) { sendError(res, e); }
   });
 

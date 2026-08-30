@@ -194,6 +194,9 @@ function match(a, b) {
 
 // ---------------------------------------------------------------------------
 
+// The names AROUND a person are most of the evidence a cross-tree match rests
+// on — and they are also names. A private living daughter must not become the
+// reason two families are told they are related.
 async function loadContext(pool, ids) {
   const parents = new Map(), children = new Map(), partners = new Map();
   if (!ids.length) return { parents, children, partners };
@@ -208,18 +211,21 @@ async function loadContext(pool, ids) {
         FROM union_children uc
         JOIN union_partners up ON up.union_id = uc.union_id
         JOIN people pp ON pp.id = up.person_id AND pp.aside_at IS NULL
+                          AND mw_is_public(pp.visibility, pp.died, pp.born_year)
        WHERE uc.person_id = ANY($1::uuid[])`, [ids]),
     pool.query(`
       SELECT up.person_id AS who, cp.name_key AS name
         FROM union_partners up
         JOIN union_children uc ON uc.union_id = up.union_id
         JOIN people cp ON cp.id = uc.person_id AND cp.aside_at IS NULL
+                          AND mw_is_public(cp.visibility, cp.died, cp.born_year)
        WHERE up.person_id = ANY($1::uuid[])`, [ids]),
     pool.query(`
       SELECT a.person_id AS who, op.name_key AS name
         FROM union_partners a
         JOIN union_partners b ON b.union_id = a.union_id AND b.person_id <> a.person_id
         JOIN people op ON op.id = b.person_id AND op.aside_at IS NULL
+                          AND mw_is_public(op.visibility, op.died, op.born_year)
        WHERE a.person_id = ANY($1::uuid[])`, [ids])
   ]);
   for (const r of par.rows) push(parents, r.who, r.name);
@@ -245,9 +251,15 @@ async function findRelatives(pool, treeId, { threshold, limit = 50 } = {}) {
              note: 'This family has asked not to be compared with others.' };
   }
 
+  // Only people this family has published. A private living person is not
+  // compared at all — not merely hidden from the results, because a match is
+  // shown to BOTH families and telling the other side "somebody here matches
+  // yours" would reveal them just as surely as naming them.
   const { rows: mine } = await pool.query(
     `SELECT id, tree_id, name, name_key, sex, totem, born, born_year, died
-       FROM people WHERE tree_id = $1 AND aside_at IS NULL AND name_key <> ''`, [treeId]);
+       FROM people
+      WHERE tree_id = $1 AND aside_at IS NULL AND name_key <> ''
+        AND mw_is_public(visibility, died, born_year)`, [treeId]);
   if (!mine.length) return { treeId, matches: [], compared: 0, shared: true };
 
   const keys = [...new Set(mine.map(p => p.name_key))];
@@ -262,7 +274,8 @@ async function findRelatives(pool, treeId, { threshold, limit = 50 } = {}) {
       WHERE p.name_key = ANY($1::text[])
         AND p.tree_id <> $2
         AND p.aside_at IS NULL
-        AND t.shares_frontier`, [keys, treeId]);
+        AND t.shares_frontier
+        AND mw_is_public(p.visibility, p.died, p.born_year)`, [keys, treeId]);
 
   if (!theirs.length) return { treeId, matches: [], compared: 0, shared: true };
 

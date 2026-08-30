@@ -376,6 +376,39 @@ const HANDLERS = {
     return { shape };
   },
 
+  /* Publish a person, or keep them out of the public record.
+ 
+     Not the same act as setting somebody aside. Aside is about the FAMILY's
+     tree — the record leaves the picture their relatives work on. This is
+     about the WORLD: a private person is fully present to their family and
+     absent from anything published. Confusing the two would either hide
+     somebody from their own relatives or publish somebody the family had
+     quietly withdrawn.
+ 
+     `visibility: null` clears the choice and returns the person to the
+     default — public if dead, private if living. */
+  async setVisibility(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const id = resolve(op.id, 'setVisibility.id');
+    const v = op.visibility === null || op.visibility === undefined ? null
+            : String(op.visibility);
+    if (v !== null && v !== 'public' && v !== 'private') {
+      throw badRequest("setVisibility.visibility must be 'public', 'private', or null to clear it");
+    }
+    await checkVersion(client, 'people', id, op.expect, 'person');
+    await client.query(
+      // $2 is cast explicitly: it appears inside a CASE, where Postgres has
+      // nothing else to infer a type from and refuses the statement outright.
+      `UPDATE people SET visibility = $2::text, visibility_by = $3,
+                         visibility_at = CASE WHEN $2::text IS NULL
+                                              THEN NULL ELSE clock_timestamp() END
+        WHERE id = $1`, [id, v, v === null ? '' : (actor || '')]);
+    // Recorded like every other change, so a person who finds themselves
+    // published can see who published them and when.
+    await logChange(client, treeId, 'person', id, 'setVisibility', { id, visibility: v }, actor);
+    return { id, visibility: v };
+  },
+
   /* Take somebody out of the tree everybody sees, without destroying them.
      This is the ONLY way a person leaves the visible tree. There is no
      delete, here or anywhere else in this API.

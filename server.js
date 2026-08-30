@@ -32,10 +32,33 @@ const DATABASE_URL = process.env.DATABASE_URL;
 // cookie never gets its Secure flag in production.
 app.set('trust proxy', 1);
 
-/* Everything below is behind the passphrase, including the static page and the
-   whole API. Mounted here, before any route, so a route added later cannot
-   accidentally sit outside it — the ordering is the guarantee, and a gate you
-   have to remember to apply is one that eventually is not.
+// Whether the public record is actually reachable by the public.
+//
+// OFF by default, and deliberately a separate switch from everything else:
+// turning it on is the moment this deployment starts publishing to the world,
+// and that should be an act somebody performs on purpose rather than a side
+// effect of deploying. Until then the visibility rules are enforced and
+// testable, but nothing is served outside the gate.
+const PUBLIC_READ = (process.env.MW_PUBLIC_READ || 'off').toLowerCase() === 'on';
+
+/* The public record, mounted BEFORE the gate — the only thing that is.
+ 
+   It has to be first, because a public record behind a passphrase is not a
+   public record. The router is created empty here and filled in once there is
+   a database; while it is empty every request falls straight through to the
+   gate below, which is exactly what should happen when publishing is off.
+ 
+   What makes this safe is not the mounting order but what is mounted: the
+   handlers call publicTree/publicPerson, which have no parameter that could
+   return a private person. Ordering decides whether the world can reach them;
+   the functions decide what the world gets. */
+const publicRouter = express.Router();
+app.use('/public', publicRouter);
+
+/* Everything else is behind the passphrase, including the static page and the
+   whole family API. Mounted here, before any of it, so a route added later
+   cannot accidentally sit outside it — the ordering is the guarantee, and a
+   gate you have to remember to apply is one that eventually is not.
  
    The passphrase itself comes from the environment and appears nowhere else:
    not in this repository, not in a log line, not in an error message. */
@@ -79,6 +102,13 @@ async function setupDatabase() {
     // fallback below exists so `npm start` works for a quick look, and it
     // cannot support transactions, constraints or incremental sync.
     app.use('/api', treeRoutes(pool, home.treeId));
+
+    if (PUBLIC_READ) {
+      publicRouter.use(treeRoutes.publicRoutes(pool));
+      console.log('Public record is ON — ancestors are readable without the passphrase.');
+    } else {
+      console.log('Public record is off (set MW_PUBLIC_READ=on to publish ancestors).');
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS kv_store (

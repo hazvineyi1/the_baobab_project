@@ -713,6 +713,14 @@ body{
   display:block; font-weight:400; font-size:11px; color:var(--muted); margin-top:1px;
 }
 
+/* A person the world cannot see. Deliberately almost nothing — a dot. Most
+   living people are private, so anything louder would cover the tree in
+   badges saying "normal". */
+.pod .shut{
+  position:absolute; right:9px; bottom:5px; width:5px; height:5px;
+  border-radius:50%; background:var(--muted); opacity:.5; font-size:0;
+}
+
 /* A row in a panel that is information rather than a button. */
 #form .askrow.static{cursor:default;}
 #form .askrow.static:hover{background:var(--pod);}
@@ -938,7 +946,11 @@ function addPerson(name, sex, totem, born, died){
     // re-attribute anything already recorded. It is the address every
     // set-aside notice is sent to: an entry with no author can still be set
     // aside, it just has nobody to tell.
-    by: meName(), at: new Date().toISOString()
+    by: meName(), at: new Date().toISOString(),
+    // Until the server answers, assume the careful thing: a new person is
+    // living and unpublished. Guessing the other way would show somebody as
+    // published for the moment before the truth arrives.
+    living: true, shown: false, vis: null, visBy: ''
   };
   fresh.add(id);
   return id;
@@ -2098,6 +2110,7 @@ function render(){
       ` style="left:${at.x}px; top:${at.y}px">` +
       badge +
       (mark ? `<span class="mk">${mark}</span>` : '') +
+      (p.shown === false ? `<span class="shut" title="Not in the public record">·</span>` : '') +
       `<span class="nm">${esc(p.name)}</span>` +
       (life ? `<span class="dates">${esc(life)}</span>` : '') +
       (p.totem ? `<span class="tot">${esc(p.totem)}</span>` : '') +
@@ -2887,6 +2900,44 @@ function openDuplicates(){
   });
   $('dNo').onclick = closeForm;
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
+/* Whether this person is in the public record.
+ 
+   Worth saying plainly on the card rather than in a settings screen, because
+   it is a decision about a person made by somebody else — usually a relative
+   filling in a branch. The wording says what will actually happen, and says
+   who it happens to: "anyone in the world can find them", not "visibility:
+   public".
+ 
+   Three states, and the third is not a fudge. Most people should never have
+   to choose: the dead belong in the record and the living do not, and
+   "Usual rule" is that, stated. Choosing is for the exceptions — a
+   grandmother who wants to be findable, a recently buried relative a family
+   would rather keep to themselves. */
+function visibilityBlock(p){
+  const v = p.vis || null;
+  const living = p.living !== false;
+  const usual = living ? 'kept out of the public record' : 'in the public record';
+  const now = p.shown ? 'Anyone in the world can find them.'
+                      : 'Only this family can see them.';
+  const btn = (val, label, title) =>
+    `<button type="button" data-vis="${val}" aria-pressed="${(v || '') === val}" ` +
+    `title="${esc(title)}">${label}</button>` ;
+  return `<p class="lbl" style="margin-top:14px;">In the public record</p>` +
+    `<div class="seg" id="cVis">` +
+      btn('', 'Usual rule', `The dead are public, the living are private. ` +
+          `For this person that means: ${usual}.`) +
+      btn('public', 'Public', 'Anyone in the world can find them.') +
+      btn('private', 'Private', 'Only this family can see them.') +
+    `</div>` +
+    `<p class="roothint">${esc(now)}` +
+      (living ? ' Recorded as living.' : ' Recorded as no longer living.') +
+      (v && p.visBy ? ` Chosen by ${esc(p.visBy)}.` : '') +
+      (living && v !== 'public'
+        ? ' A living person should be asked before they are published.'
+        : '') +
+    `</p>`;
 }
 
 /* ── mitupo ──────────────────────────────────────────────────────────────
@@ -3735,6 +3786,7 @@ function openCard(id){
         'from the tree itself.'
       : 'Mark this if nobody can go back past them — it tells the next person ' +
         'the work ended here rather than leaving them to guess.'}</p>` +
+    visibilityBlock(p) +
     `<button class="btn ghost wide${meId === id ? ' on' : ''}" id="cMe">` +
       `${meId === id ? '● This is you' : 'This is me'}</button>` +
     `<div class="row"><button class="btn" id="cSave">Save</button>` +
@@ -3757,6 +3809,15 @@ function openCard(id){
   };
   $('cSave').onclick = () => { commit(); closeForm(); render(); save(); };
   $('cNo').onclick = closeForm;
+  el.querySelectorAll('[data-vis]').forEach(b => b.onclick = () => {
+    commit();
+    const v = b.dataset.vis;
+    p.vis = v === '' ? null : v;
+    closeForm(); render(); save();
+    say(p.vis === 'public'  ? `${p.name} is in the public record.`
+      : p.vis === 'private' ? `${p.name} is kept out of the public record.`
+      : `${p.name} follows the usual rule.`);
+  });
   $('cRoot').onclick = () => { commit(); toggleRoot(id); closeForm(); render(); save();
     say(`${p.name} ${p.root ? 'is now the root of the line' : 'is no longer marked as the root'}.`); };
   $('cMe').onclick = () => { commit(); setMe(meId === id ? null : id); closeForm(); render(); save(); };
@@ -4674,6 +4735,10 @@ function adopt(tree){
       born:p.born || '', died:p.died || '', root:!!p.is_root,
       by:p.added_by || '', at:p.created_at, v:p.updated_at
     };
+    next.people[p.id].living = !!p.is_living;
+    next.people[p.id].shown  = !!p.is_public;      // as things stand today
+    next.people[p.id].vis    = p.visibility || null;   // the explicit choice
+    next.people[p.id].visBy  = p.visibility_by || '';
     if (p.aside_at){
       next.people[p.id].aside = {
         by:p.aside_by || '', at:p.aside_at, why:p.aside_why || '',
@@ -4732,6 +4797,7 @@ function diffOps(was, now){
       ops.push({ op:'updatePerson', id, expect:b.v, ...fields });
     }
     if (!!p.root !== !!b.root) ops.push({ op:'setRoot', personId:id, root:!!p.root });
+    if ((p.vis || null) !== (b.vis || null)) ops.push({ op:'setVisibility', id, visibility:p.vis || null });
     if (p.aside && !b.aside)   ops.push({ op:'setAside', id, why:p.aside.why,
                                           mergedInto:p.aside.mergedInto || undefined });
     if (!p.aside && b.aside)   ops.push({ op:'restore', id });
