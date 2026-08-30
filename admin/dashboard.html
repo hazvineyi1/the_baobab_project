@@ -1,0 +1,733 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Keeper — The Muwuyu Project</title>
+<!--
+  The keeper's dashboard.
+
+  NOT IN public/. Everything in that directory is served by express.static to
+  everybody who is through the gate, which is every family on the deployment.
+  This file is read and served by routes/admin.js behind requireAdmin, so a
+  family session that asks for it is refused rather than served.
+
+  One file, no build step, no framework — the same rule the family's page
+  follows, for the same reason: this has to be readable and repairable by
+  whoever inherits it, years from now, without a toolchain.
+
+  WHAT IS DELIBERATELY ABSENT. There is no way to read a family's tree here,
+  because the API has no endpoint that would allow it. An administrator of a
+  project whose promise is that a family keeps its own records must not be able
+  to read them all quietly, and the way to mean that is for the capability to
+  be missing rather than merely unexercised.
+-->
+<style>
+  /* The project's own tokens, dark and light, as everywhere else. */
+  :root{
+    color-scheme:light dark;
+    --sky:#F6F1E6; --ink:#221C13; --muted:#6E6555; --faint:#94897A;
+    --pod:#FFFDF7; --edge:#E3D9C6; --edge2:#EFE7D8; --gold:#8A5A16;
+    --good:#3F6B3A; --warn:#8A5A16; --bad:#9E3B2C;
+    /* Chart steps, validated for light surfaces (OKLCH band, chroma floor,
+       CVD separation, contrast) rather than chosen by eye. */
+    --s1:#C08420; --s2:#3F6EA8; --s3:#9E3B2C;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --sky:#12100C; --ink:#F0EADC; --muted:#95907F; --faint:#7A7365;
+    --pod:#1B1813; --edge:#2E2920; --edge2:#241F19; --gold:#D9A441;
+    --good:#84A86E; --warn:#D9A441; --bad:#D98A78;
+    /* Dark is chosen, not flipped: its own steps from the same hues,
+       validated against this surface. */
+    --s1:#BC862A; --s2:#5A8CC8; --s3:#C05F4D;
+  }}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--sky);color:var(--ink);
+       font:14px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+  h1,h2,h3{font-family:Charter,"Bitstream Charter","DejaVu Serif",Georgia,serif;
+           font-weight:600;margin:0}
+  a{color:var(--gold)}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px 18px 64px}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+         padding-bottom:14px;border-bottom:1px solid var(--edge)}
+  header h1{font-size:20px}
+  header h1 em{font-style:normal;color:var(--gold)}
+  header .who{color:var(--muted);font-size:12.5px;margin-left:auto}
+
+  nav{display:flex;gap:2px;flex-wrap:wrap;margin:14px 0 18px}
+  nav button{appearance:none;border:1px solid transparent;background:none;
+    color:var(--muted);font:inherit;font-size:13px;padding:7px 13px;
+    border-radius:9px;cursor:pointer}
+  nav button:hover{color:var(--ink);background:var(--edge2)}
+  nav button[aria-selected=true]{background:var(--pod);border-color:var(--edge);
+    color:var(--ink);font-weight:600}
+  nav .count{display:inline-block;min-width:17px;padding:0 5px;margin-left:6px;
+    border-radius:9px;background:var(--bad);color:var(--pod);font-size:11px;
+    font-weight:700;text-align:center}
+
+  .panel[hidden]{display:none}
+  .card{background:var(--pod);border:1px solid var(--edge);border-radius:14px;
+        padding:16px 18px;margin-bottom:14px}
+  .card > h2{font-size:15px;margin-bottom:2px}
+  .card > .sub{color:var(--muted);font-size:12.5px;margin:0 0 14px}
+
+  /* Stat tiles: a number is the whole chart when there is one number. */
+  .tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  .tile{background:var(--pod);border:1px solid var(--edge);border-radius:14px;padding:14px 16px}
+  .tile .n{font-family:Charter,Georgia,serif;font-size:27px;line-height:1.1;
+           font-variant-numeric:tabular-nums}
+  .tile .k{color:var(--muted);font-size:11px;letter-spacing:.09em;
+           text-transform:uppercase;margin-top:5px}
+  .tile .approx{color:var(--faint);font-size:11px;margin-top:3px}
+  .tile.alarm .n{color:var(--bad)}
+
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-weight:600;color:var(--muted);font-size:11px;
+     letter-spacing:.08em;text-transform:uppercase;padding:0 10px 8px 0;
+     border-bottom:1px solid var(--edge);white-space:nowrap}
+  td{padding:9px 10px 9px 0;border-bottom:1px solid var(--edge2);
+     vertical-align:top}
+  tbody tr:hover{background:var(--edge2)}
+  .num{font-variant-numeric:tabular-nums;text-align:right;padding-right:14px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .scroll{overflow-x:auto}
+
+  .pill{display:inline-block;padding:1px 8px;border-radius:20px;font-size:11px;
+        border:1px solid var(--edge);color:var(--muted);white-space:nowrap}
+  .pill.bad{color:var(--bad);border-color:var(--bad)}
+  .pill.good{color:var(--good);border-color:var(--good)}
+  .pill.warn{color:var(--warn);border-color:var(--warn)}
+
+  button.act{appearance:none;border:1px solid var(--edge);background:var(--pod);
+    color:var(--ink);font:inherit;font-size:12.5px;padding:6px 11px;
+    border-radius:9px;cursor:pointer}
+  button.act:hover{border-color:var(--gold);color:var(--gold)}
+  button.act.strong{background:var(--gold);border-color:var(--gold);color:var(--pod)}
+  button.act.danger:hover{border-color:var(--bad);color:var(--bad)}
+  button.act[disabled]{opacity:.5;cursor:default}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row.tight{gap:6px}
+
+  input,select,textarea{font:inherit;font-size:13px;padding:8px 11px;
+    border:1.5px solid var(--edge);border-radius:9px;background:transparent;
+    color:var(--ink)}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold)}
+  textarea{width:100%;min-height:80px;resize:vertical}
+  .grow{flex:1;min-width:150px}
+
+  /* Small multiples: three single-series strips sharing one x. Not one chart
+     with three y-scales — sign-ins, edits and failures are different measures
+     and stacking or double-axing them would invent a relationship. */
+  .strip{margin-bottom:14px}
+  .strip:last-child{margin-bottom:0}
+  .strip h3{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .strip h3 .swatch{width:9px;height:9px;border-radius:2px;flex:none}
+  .strip h3 .peak{margin-left:auto;color:var(--muted);font-weight:400;font-size:11.5px;
+    font-variant-numeric:tabular-nums}
+  /* A baseline, so a day with one event and a day with none are not both a
+     hairline against nothing. */
+  .bars{display:flex;align-items:flex-end;gap:2px;height:54px;margin-top:7px;
+    border-bottom:1px solid var(--edge)}
+  .bars .b{flex:1;position:relative;display:flex;align-items:flex-end;height:100%;
+    border-radius:3px}
+  .bars .b:hover{background:var(--edge2)}
+  .bars .b i{display:block;width:100%;border-radius:4px 4px 0 0;min-height:1px}
+  .bars .b .tip{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);
+    margin-bottom:6px;background:var(--ink);color:var(--sky);font-size:11.5px;
+    padding:4px 8px;border-radius:7px;white-space:nowrap;opacity:0;
+    pointer-events:none;transition:opacity .1s;z-index:5}
+  .bars .b:hover .tip{opacity:1}
+  .axis{display:flex;justify-content:space-between;color:var(--faint);
+    font-size:10.5px;margin-top:4px}
+
+  .detail{border-top:1px solid var(--edge);margin-top:14px;padding-top:14px}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:12.5px}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0;font-variant-numeric:tabular-nums}
+
+  /* The one-time passcode. Deliberately loud: it is the only moment it can be
+     seen, and an admin who scrolls past it has to go and issue another. */
+  .reveal{position:fixed;inset:0;background:rgba(18,16,12,.72);display:grid;
+    place-items:center;padding:20px;z-index:50}
+  .reveal .card{max-width:460px;margin:0}
+  .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:23px;
+    letter-spacing:.02em;background:var(--edge2);border:1px dashed var(--gold);
+    border-radius:11px;padding:14px;text-align:center;margin:12px 0;
+    word-break:break-all;user-select:all}
+  .say{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+  .empty{color:var(--muted);font-size:13px;padding:16px 0}
+  .err{color:var(--bad);font-size:12.5px;margin-top:8px}
+</style>
+</head><body>
+<div class="wrap">
+
+<header>
+  <h1>The <em>Muwuyu</em> Project</h1>
+  <span class="pill">keeper</span>
+  <span class="who" id="who"></span>
+  <button class="act" id="signOut">Sign out</button>
+</header>
+
+<nav id="tabs">
+  <button data-tab="overview" aria-selected="true">Overview</button>
+  <button data-tab="families">Families</button>
+  <button data-tab="activity">Activity</button>
+  <button data-tab="sessions">Signed in</button>
+  <button data-tab="appeals">Appeals<span class="count" id="appealCount" hidden></span></button>
+  <button data-tab="storage">Storage</button>
+</nav>
+
+<!-- ── overview ───────────────────────────────────────────────────────── -->
+<section class="panel" id="tab-overview">
+  <div class="tiles" id="tiles"></div>
+  <div class="card" style="margin-top:14px">
+    <h2>The last fortnight</h2>
+    <p class="sub">Three separate measures, three separate scales. Hover a day.</p>
+    <div id="charts"></div>
+  </div>
+</section>
+
+<!-- ── families ───────────────────────────────────────────────────────── -->
+<section class="panel" id="tab-families" hidden>
+  <div class="card">
+    <h2>Families</h2>
+    <p class="sub">Search by name, by the handle at the front of a passcode, or by
+       a sharing link. Sizes and dates only — never what is in a tree.</p>
+    <div class="row">
+      <input class="grow" id="famQ" placeholder="a name, a handle, or a link"
+             autocapitalize="off" autocorrect="off">
+      <select id="famFilter">
+        <option value="">All families</option>
+        <option value="suspended">Closed</option>
+        <option value="no_passcode">Never issued a passcode</option>
+      </select>
+      <button class="act" id="famSearch">Search</button>
+    </div>
+    <div class="scroll"><table id="famTable"><thead><tr>
+      <th>Family</th><th>Handle</th><th class="num">People</th>
+      <th class="num">Here now</th><th>Last edit</th><th>Passcode</th><th></th>
+    </tr></thead><tbody></tbody></table></div>
+    <div class="row" style="margin-top:12px">
+      <button class="act" id="famMore" hidden>Show more</button>
+    </div>
+    <div id="famDetail"></div>
+  </div>
+</section>
+
+<!-- ── activity ───────────────────────────────────────────────────────── -->
+<section class="panel" id="tab-activity" hidden>
+  <div class="card">
+    <h2>Who, when, where, what</h2>
+    <p class="sub">Every sign-in, every refusal, every invitation, every batch of
+       edits. What an edit actually changed is in the family's own change log,
+       which this points at rather than copies.</p>
+    <div class="row">
+      <select id="evKind">
+        <option value="">Everything</option>
+        <option value="gate">Sign-ins and refusals</option>
+        <option value="gate.fail">Refusals only</option>
+        <option value="tree.ops">Edits</option>
+        <option value="invite">Invitations</option>
+        <option value="passcode">Passcodes</option>
+        <option value="family">Families</option>
+        <option value="appeal">Appeals</option>
+        <option value="session">Sessions</option>
+      </select>
+      <input id="evIp" placeholder="from this address" class="mono" size="16">
+      <input id="evActor" placeholder="by this name" size="14">
+      <input id="evSince" type="date">
+      <button class="act" id="evGo">Show</button>
+    </div>
+    <div class="scroll"><table id="evTable"><thead><tr>
+      <th>When</th><th>What</th><th>Family</th><th>Who</th><th>Where</th><th>Detail</th>
+    </tr></thead><tbody></tbody></table></div>
+    <div class="row" style="margin-top:12px">
+      <button class="act" id="evMore" hidden>Show more</button>
+    </div>
+  </div>
+</section>
+
+<!-- ── sessions ───────────────────────────────────────────────────────── -->
+<section class="panel" id="tab-sessions" hidden>
+  <div class="card">
+    <h2>Signed in now</h2>
+    <p class="sub">Ending one signs that browser out at once. It does not touch
+       the family's passcode, and they can sign back in with it.</p>
+    <div class="row">
+      <label class="row tight" style="font-size:12.5px;color:var(--muted)">
+        <input type="checkbox" id="sesStale" style="width:auto"> include ended
+      </label>
+      <button class="act" id="sesGo">Refresh</button>
+    </div>
+    <div class="scroll"><table id="sesTable"><thead><tr>
+      <th>Family</th><th>How</th><th>Who</th><th>Where</th><th>Last seen</th><th></th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<!-- ── appeals ────────────────────────────────────────────────────────── -->
+<section class="panel" id="tab-appeals" hidden>
+  <div class="card">
+    <h2>Appeals</h2>
+    <p class="sub">Oldest first, because the one that has waited longest is the
+       one to answer next.</p>
+    <div class="row">
+      <select id="apStatus">
+        <option value="open">Open</option>
+        <option value="answered">Answered</option>
+        <option value="closed">Closed</option>
+        <option value="all">All</option>
+      </select>
+      <button class="act" id="apGo">Show</button>
+    </div>
+    <div id="apList"></div>
+  </div>
+</section>
+
+<!-- ── storage ────────────────────────────────────────────────────────── -->
+<section class="panel" id="tab-storage" hidden>
+  <div class="card">
+    <h2>What the database is holding</h2>
+    <p class="sub">Largest first. The record of who did what is partitioned by
+       month — each <span class="mono">audit_events_YYYYMM</span> is one month,
+       and dropping a year of history is dropping tables rather than deleting
+       rows.</p>
+    <div class="scroll"><table id="stTable"><thead><tr>
+      <th>Table</th><th class="num">Size</th><th class="num">Rows (approx)</th>
+    </tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+  ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+/* Every call goes through here so that a session that has ended sends the
+   keeper back to the door rather than leaving a dashboard full of silent
+   failures on screen. */
+async function api(path, opts) {
+  const r = await fetch(path, {
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    ...opts
+  });
+  if (r.status === 401 || r.status === 403) { location.href = '/gate'; throw new Error('signed out'); }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.message || ('the server answered ' + r.status));
+  return body;
+}
+const post = (path, body) => api(path, { method: 'POST', body: JSON.stringify(body || {}) });
+
+// Dates: the keeper is one person in one place, so local time is the useful
+// form. Seconds matter for a sign-in, not for a family's creation.
+const when = t => t ? new Date(t).toLocaleString(undefined,
+  { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : '—';
+const day = t => t ? new Date(t).toLocaleDateString(undefined,
+  { month:'short', day:'numeric' }) : '—';
+const ago = t => {
+  if (!t) return '—';
+  const s = (Date.now() - new Date(t)) / 1000;
+  if (s < 90) return 'just now';
+  if (s < 5400) return Math.round(s / 60) + ' min ago';
+  if (s < 172800) return Math.round(s / 3600) + ' h ago';
+  return Math.round(s / 86400) + ' days ago';
+};
+
+// ── tabs ────────────────────────────────────────────────────────────────
+const loaders = {};
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('button[data-tab]');
+  if (!b) return;
+  for (const t of $('tabs').querySelectorAll('button')) t.setAttribute('aria-selected', t === b);
+  for (const p of document.querySelectorAll('.panel')) p.hidden = p.id !== 'tab-' + b.dataset.tab;
+  if (loaders[b.dataset.tab]) loaders[b.dataset.tab]();
+});
+
+// ── overview ────────────────────────────────────────────────────────────
+
+/* A count that is exact says so by not saying anything; one estimated from the
+   planner's own statistics says "about". Presenting a guess as a fact is the
+   thing a dashboard must not do, and at a million rows an exact count is a
+   table scan nobody would wait for. */
+function tile(n, k, { approx = false, alarm = false } = {}) {
+  return `<div class="tile${alarm && n ? ' alarm' : ''}">
+    <div class="n">${Number(n).toLocaleString()}</div>
+    <div class="k">${esc(k)}</div>
+    ${approx ? '<div class="approx">estimated, not counted</div>' : ''}
+  </div>`;
+}
+
+const SERIES = [
+  { key:'signins',  label:'Sign-ins',        color:'var(--s1)' },
+  { key:'edits',    label:'Batches of edits', color:'var(--s2)' },
+  { key:'failures', label:'Refused attempts', color:'var(--s3)' }
+];
+
+/* Three strips, one measure each, each on its own scale.
+
+   Not one chart with three lines: sign-ins and refusals differ by an order of
+   magnitude on a normal day, so a shared scale would flatten refusals into the
+   axis — and a second y-axis would invent a relationship between two things
+   that only share a date. Each strip names its own peak, which is the number a
+   shared axis would have carried. */
+function strips(days) {
+  if (!days.length) return '<p class="empty">Nothing recorded yet.</p>';
+  return SERIES.map(s => {
+    const max = Math.max(1, ...days.map(d => d[s.key] || 0));
+    const bars = days.map(d => {
+      const v = d[s.key] || 0;
+      const h = Math.round((v / max) * 100);
+      return `<div class="b"><i style="height:${v ? Math.max(h, 3) : 0}%;
+        background:${s.color}"></i><span class="tip">${day(d.day)} · ${v.toLocaleString()}</span></div>`;
+    }).join('');
+    return `<div class="strip">
+      <h3><span class="swatch" style="background:${s.color}"></span>${s.label}
+        <span class="peak">peak ${max.toLocaleString()} a day</span></h3>
+      <div class="bars">${bars}</div>
+      <div class="axis"><span>${day(days[0].day)}</span><span>${day(days[days.length-1].day)}</span></div>
+    </div>`;
+  }).join('');
+}
+
+loaders.overview = async () => {
+  const o = await api('/api/admin/overview');
+  $('tiles').innerHTML =
+    tile(o.families.n, 'families', { approx: !o.families.exact }) +
+    tile(o.people.n, 'people recorded', { approx: !o.people.exact }) +
+    tile(o.sessions, 'signed in now') +
+    tile(o.signins_24h, 'sign-ins today') +
+    tile(o.failed_24h, 'refused today', { alarm: true }) +
+    tile(o.openAppeals, 'appeals waiting', { alarm: true }) +
+    tile(o.suspended, 'families closed', { alarm: true }) +
+    tile(o.without_passcode, 'no passcode yet', { alarm: true });
+
+  badge(o.openAppeals);
+  const { days } = await api('/api/admin/activity?days=14');
+  $('charts').innerHTML = strips(days);
+};
+
+function badge(n) {
+  const el = $('appealCount');
+  el.hidden = !n;
+  el.textContent = n;
+}
+
+// ── families ────────────────────────────────────────────────────────────
+let famCursor = null;
+
+async function loadFamilies(more) {
+  const q = new URLSearchParams();
+  if ($('famQ').value.trim()) q.set('q', $('famQ').value.trim());
+  if ($('famFilter').value) q.set('filter', $('famFilter').value);
+  if (more && famCursor) { q.set('cursor_at', famCursor.created_at); q.set('cursor_id', famCursor.id); }
+
+  const d = await api('/api/admin/families?' + q);
+  const body = $('famTable').querySelector('tbody');
+  if (!more) body.innerHTML = '';
+  if (!d.families.length && !more) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">No family answers to that.</td></tr>';
+  }
+  for (const f of d.families) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>${esc(f.name)}${f.suspended_at ? ' <span class="pill bad">closed</span>' : ''}</td>` +
+      `<td class="mono">${esc(f.handle)}</td>` +
+      `<td class="num">${f.people.toLocaleString()}</td>` +
+      `<td class="num">${f.live_sessions || ''}</td>` +
+      `<td>${f.last_edit ? ago(f.last_edit) : '<span style="color:var(--faint)">never</span>'}</td>` +
+      `<td>${f.has_passcode
+        ? `<span class="pill good">issued ${day(f.passcode_set_at)}</span>`
+        : '<span class="pill warn">never issued</span>'}</td>` +
+      `<td><button class="act" data-open="${esc(f.id)}">Open</button></td>`;
+    body.appendChild(tr);
+  }
+  famCursor = d.next;
+  $('famMore').hidden = !d.next;
+}
+
+loaders.families = () => loadFamilies(false).catch(showErr);
+$('famSearch').onclick = () => { famCursor = null; loadFamilies(false).catch(showErr); };
+$('famQ').addEventListener('keydown', e => { if (e.key === 'Enter') $('famSearch').click(); });
+$('famFilter').onchange = () => $('famSearch').click();
+$('famMore').onclick = () => loadFamilies(true).catch(showErr);
+
+$('famTable').addEventListener('click', e => {
+  const b = e.target.closest('button[data-open]');
+  if (b) openFamily(b.dataset.open).catch(showErr);
+});
+
+async function openFamily(id) {
+  const d = await api('/api/admin/family/' + encodeURIComponent(id));
+  const f = d.family;
+  const hands = f.hands.length
+    ? f.hands.map(h => `${esc(h.actor)} <span style="color:var(--muted)">(${h.changes})</span>`).join(', ')
+    : '<span style="color:var(--faint)">nobody has said who they are</span>';
+
+  $('famDetail').innerHTML = `<div class="detail">
+    <h2 style="font-size:16px">${esc(f.name)}</h2>
+    <p class="sub" style="margin:4px 0 14px">
+      <span class="mono">${esc(f.handle)}</span> · started ${day(f.created_at)}
+      ${f.created_by ? 'by ' + esc(f.created_by) : ''}</p>
+
+    <dl class="kv">
+      <dt>People</dt><dd>${f.people.toLocaleString()} (${f.set_aside} set aside)</dd>
+      <dt>Edits</dt><dd>${f.changes.toLocaleString()}${f.last_edit ? ', last ' + ago(f.last_edit) : ''}</dd>
+      <dt>Hands</dt><dd>${hands}</dd>
+      <dt>Passcode</dt><dd>${f.has_passcode
+        ? `issued ${when(f.passcode_set_at)}${f.passcode_set_by ? ' by ' + esc(f.passcode_set_by) : ''}
+           · generation ${f.passcode_gen}`
+        : '<span class="pill warn">never issued</span>'}</dd>
+      <dt>State</dt><dd>${f.suspended_at
+        ? `<span class="pill bad">closed ${day(f.suspended_at)}</span> ${esc(f.suspended_reason)}`
+        : '<span class="pill good">open</span>'}</dd>
+    </dl>
+
+    <div class="row" style="margin-top:14px">
+      <button class="act strong" data-act="passcode" data-id="${esc(f.id)}">Issue a new passcode</button>
+      ${f.suspended_at
+        ? `<button class="act" data-act="restore" data-id="${esc(f.id)}">Reopen this family</button>`
+        : `<button class="act danger" data-act="suspend" data-id="${esc(f.id)}">Close this family</button>`}
+      <button class="act danger" data-act="revoke-sessions" data-id="${esc(f.id)}">Sign everyone out</button>
+    </div>
+    <p class="say">Issuing a passcode ends every session this family has open, and
+       the new one can be shown only once. Nobody can read the old one back — not
+       even from the database.</p>
+
+    <h3 style="font-size:13px;margin-top:20px">Their last few events</h3>
+    <div class="scroll"><table><thead><tr>
+      <th>When</th><th>What</th><th>Who</th><th>Where</th></tr></thead><tbody>
+      ${d.events.length ? d.events.map(e => `<tr>
+        <td>${when(e.at)}</td><td class="mono">${esc(e.kind)}</td>
+        <td>${esc(e.actor) || '—'}</td><td class="mono">${esc(e.ip) || '—'}</td>
+      </tr>`).join('') : '<tr><td colspan="4" class="empty">Nothing yet.</td></tr>'}
+    </tbody></table></div>
+  </div>`;
+  $('famDetail').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+$('famDetail').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-act]');
+  if (!b) return;
+  const id = b.dataset.id;
+  try {
+    if (b.dataset.act === 'passcode') {
+      const reason = prompt('Why is this being issued? (kept in the record)') ?? '';
+      const d = await post(`/api/admin/family/${id}/passcode`, { reason });
+      reveal(d);
+    } else if (b.dataset.act === 'suspend') {
+      const reason = prompt('Why is this family being closed? They will be shown ' +
+                            'this reason if they ask.') ?? '';
+      if (reason === null) return;
+      await post(`/api/admin/family/${id}/suspend`, { reason });
+    } else if (b.dataset.act === 'restore') {
+      await post(`/api/admin/family/${id}/restore`);
+    } else if (b.dataset.act === 'revoke-sessions') {
+      if (!confirm('Sign everybody in this family out? Their passcode still works.')) return;
+      const d = await post(`/api/admin/family/${id}/revoke-sessions`);
+      alert(`${d.ended} session${d.ended === 1 ? '' : 's'} ended.`);
+    }
+    await openFamily(id);
+    await loadFamilies(false);
+  } catch (err) { showErr(err); }
+});
+
+/* The one-time reveal. Modal, and it does not close on a stray click: the
+   passcode cannot be shown again, and an admin who dismisses it by accident
+   has to issue another and start the conversation over. */
+function reveal(d) {
+  const el = document.createElement('div');
+  el.className = 'reveal';
+  el.innerHTML = `<div class="card">
+    <h2>The passcode for ${esc(d.name)}</h2>
+    <p class="sub">Give this to the family. It is the only time it can be seen.</p>
+    <div class="code" id="revealCode">${esc(d.passcode)}</div>
+    <p class="say">${esc(d.notice)}</p>
+    ${d.sessionsEnded ? `<p class="say">${d.sessionsEnded} session${d.sessionsEnded === 1 ? '' : 's'}
+      ended — everyone who was signed in must use the new passcode.</p>` : ''}
+    <div class="row" style="margin-top:14px">
+      <button class="act strong" id="revealCopy">Copy it</button>
+      <button class="act" id="revealDone">I have written it down</button>
+    </div>
+  </div>`;
+  document.body.appendChild(el);
+  el.querySelector('#revealCopy').onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(d.passcode);
+      el.querySelector('#revealCopy').textContent = 'Copied';
+    } catch {
+      // Clipboard access is refused in plenty of ordinary situations. Select it
+      // instead so it can still be copied by hand.
+      const r = document.createRange();
+      r.selectNodeContents(el.querySelector('#revealCode'));
+      getSelection().removeAllRanges(); getSelection().addRange(r);
+    }
+  };
+  el.querySelector('#revealDone').onclick = () => el.remove();
+}
+
+// ── activity ────────────────────────────────────────────────────────────
+let evCursor = null;
+
+async function loadEvents(more) {
+  const q = new URLSearchParams({ limit: '60' });
+  if ($('evKind').value) q.set('kind', $('evKind').value);
+  if ($('evIp').value.trim()) q.set('ip', $('evIp').value.trim());
+  if ($('evActor').value.trim()) q.set('actor', $('evActor').value.trim());
+  if ($('evSince').value) q.set('since', $('evSince').value);
+  if (more && evCursor) { q.set('cursor_at', evCursor.at); q.set('cursor_id', evCursor.id); }
+
+  const d = await api('/api/admin/events?' + q);
+  const body = $('evTable').querySelector('tbody');
+  if (!more) body.innerHTML = '';
+  if (!d.events.length && !more) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">Nothing matches that.</td></tr>';
+  }
+  for (const e of d.events) {
+    const detail = Object.entries(e.detail || {})
+      .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td style="white-space:nowrap">${when(e.at)}</td>` +
+      `<td class="mono">${e.ok === false ? '<span class="pill bad">' + esc(e.kind) + '</span>'
+                                         : esc(e.kind)}</td>` +
+      `<td class="mono" style="font-size:11px">${e.tree_id ? esc(e.tree_id).slice(0, 8) : '—'}</td>` +
+      `<td>${esc(e.actor) || '—'}</td>` +
+      `<td class="mono">${esc(e.ip) || '—'}</td>` +
+      `<td style="color:var(--muted);font-size:12px">${esc(detail)}</td>`;
+    body.appendChild(tr);
+  }
+  evCursor = d.next;
+  $('evMore').hidden = !d.next;
+}
+
+loaders.activity = () => { evCursor = null; loadEvents(false).catch(showErr); };
+$('evGo').onclick = () => { evCursor = null; loadEvents(false).catch(showErr); };
+$('evMore').onclick = () => loadEvents(true).catch(showErr);
+
+// ── sessions ────────────────────────────────────────────────────────────
+async function loadSessions() {
+  const q = new URLSearchParams({ limit: '200' });
+  if ($('sesStale').checked) q.set('stale', '1');
+  const d = await api('/api/admin/sessions?' + q);
+  const body = $('sesTable').querySelector('tbody');
+  body.innerHTML = d.sessions.length ? '' :
+    '<tr><td colspan="6" class="empty">Nobody is signed in.</td></tr>';
+  for (const s of d.sessions) {
+    const dead = s.revoked_at || new Date(s.expires_at) < new Date();
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td>${s.scope === 'admin' ? '<span class="pill">the keeper</span>'
+                                 : esc(s.tree_name || '—')}</td>` +
+      `<td><span class="pill">${esc(s.via || '—')}</span></td>` +
+      `<td>${esc(s.actor) || '—'}</td>` +
+      `<td class="mono">${esc(s.last_ip || s.created_ip || '—')}</td>` +
+      `<td>${ago(s.last_seen_at)}${dead ? ' <span class="pill bad">ended</span>' : ''}</td>` +
+      `<td>${dead ? '' : `<button class="act danger" data-end="${esc(s.id)}">End</button>`}</td>`;
+    body.appendChild(tr);
+  }
+}
+loaders.sessions = () => loadSessions().catch(showErr);
+$('sesGo').onclick = () => loadSessions().catch(showErr);
+$('sesStale').onchange = () => loadSessions().catch(showErr);
+$('sesTable').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-end]');
+  if (!b) return;
+  try { await post(`/api/admin/session/${b.dataset.end}/revoke`); await loadSessions(); }
+  catch (err) { showErr(err); }
+});
+
+// ── appeals ─────────────────────────────────────────────────────────────
+const KIND_WORDS = {
+  passcode: 'Lost passcode', erasure: 'Somebody taken out of a tree',
+  access: 'Cannot get in', other: 'Something else'
+};
+
+async function loadAppeals() {
+  const { appeals } = await api('/api/admin/appeals?status=' +
+    encodeURIComponent($('apStatus').value) + '&limit=100');
+  if (!appeals.length) {
+    $('apList').innerHTML = '<p class="empty">Nothing here.</p>';
+    return;
+  }
+  $('apList').innerHTML = appeals.map(a => `
+    <div class="detail" data-appeal="${esc(a.id)}">
+      <div class="row" style="margin-bottom:8px">
+        <span class="pill ${a.kind === 'erasure' ? 'warn' : ''}">${esc(KIND_WORDS[a.kind] || a.kind)}</span>
+        <span class="pill ${a.status === 'open' ? 'bad' : 'good'}">${esc(a.status)}</span>
+        <span style="color:var(--muted);font-size:12.5px">${when(a.raised_at)}</span>
+        <span style="color:var(--muted);font-size:12.5px;margin-left:auto"
+              class="mono">${esc(a.raised_ip || '')}</span>
+      </div>
+      <dl class="kv" style="margin-bottom:10px">
+        <dt>Family</dt><dd>${esc(a.tree_label || '—')}
+          ${a.tree_id ? `<span class="mono" style="font-size:11px;color:var(--muted)">${esc(a.tree_id).slice(0,8)}</span>` : ''}</dd>
+        <dt>From</dt><dd>${esc(a.raised_by) || '<span style="color:var(--faint)">unsigned</span>'}</dd>
+        <dt>Reach them</dt><dd>${esc(a.contact) || '<span style="color:var(--faint)">nothing given</span>'}</dd>
+        ${a.person_name ? `<dt>About</dt><dd>${esc(a.person_name)}</dd>` : ''}
+      </dl>
+      <p style="white-space:pre-wrap;margin:0 0 12px">${esc(a.body)}</p>
+      ${a.status === 'open' ? `
+        <textarea placeholder="What you did, or what you told them."></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="act strong" data-resolve="answered">Answered</button>
+          <button class="act" data-resolve="closed">Close without answering</button>
+        </div>`
+      : `<p class="say">${esc(a.answered_by)} · ${when(a.answered_at)}<br>
+         ${esc(a.answer) || '<span style="color:var(--faint)">no note left</span>'}</p>`}
+    </div>`).join('');
+}
+loaders.appeals = () => loadAppeals().catch(showErr);
+$('apGo').onclick = () => loadAppeals().catch(showErr);
+$('apStatus').onchange = () => loadAppeals().catch(showErr);
+$('apList').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-resolve]');
+  if (!b) return;
+  const box = b.closest('[data-appeal]');
+  try {
+    await post(`/api/admin/appeal/${box.dataset.appeal}/resolve`, {
+      status: b.dataset.resolve, answer: box.querySelector('textarea').value });
+    await loadAppeals();
+    const o = await api('/api/admin/overview');
+    badge(o.openAppeals);
+  } catch (err) { showErr(err); }
+});
+
+// ── storage ─────────────────────────────────────────────────────────────
+loaders.storage = async () => {
+  const { tables } = await api('/api/admin/storage');
+  $('stTable').querySelector('tbody').innerHTML = tables.map(t => `<tr>
+    <td class="mono">${esc(t.table)}</td>
+    <td class="num">${esc(t.size)}</td>
+    <td class="num">${Number(t.approx_rows) < 0 ? '—' : Number(t.approx_rows).toLocaleString()}</td>
+  </tr>`).join('');
+};
+
+// ── the frame ───────────────────────────────────────────────────────────
+function showErr(err) {
+  if (String(err.message) === 'signed out') return;
+  const p = document.createElement('p');
+  p.className = 'err';
+  p.textContent = err.message || 'That did not work.';
+  document.querySelector('.panel:not([hidden]) .card, .panel:not([hidden])').appendChild(p);
+  setTimeout(() => p.remove(), 6000);
+}
+
+$('signOut').onclick = async () => {
+  try { await post('/api/admin/sign-out'); } catch {}
+  location.href = '/gate';
+};
+
+api('/api/admin/me').then(me => {
+  $('who').textContent = me.actor ? me.actor : '';
+}).catch(() => {});
+
+loaders.overview().catch(showErr);
+})();
+</script>
+</body></html>

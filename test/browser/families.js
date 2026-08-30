@@ -46,9 +46,15 @@ const section = t => console.log('\n' + t);
   is(await mineCount(), 3, 'three people recorded');
 
   section('somewhere else, another family records the same old man');
-  // Entered directly against the API, as a second household on the same
-  // deployment would be — a different tree, no shared ids with this one.
-  const otherTree = await page.evaluate(async tag => {
+  /* A SEPARATE BROWSER, because a separate family is now a separate sign-in.
+
+     This used to be done from this page: one session created a second tree and
+     wrote into it. Per-family passcodes ended that — a session belongs to one
+     family, and starting a new one moves the session into it. Which is the
+     point of the whole change, so the suite is written the way a second
+     household actually works rather than the way it used to be convenient. */
+  const them = await openApp(browser, { viewport:{ width:1280, height:960 } });
+  const otherTree = await them.page.evaluate(async tag => {
     const t = await fetch('/api/trees', {
       method:'POST', headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ name:'Chikwanha' })
@@ -70,6 +76,8 @@ const section = t => console.log('\n' + t);
   }, TAG);
   is(/^[0-9a-f-]{36}$/.test(otherTree), true, 'the second family exists');
 
+  const treeIdOfPage = await page.evaluate(() => treeId);
+
   section('the button appears, and the panel finds them');
   await page.evaluate(() => render());
   await page.waitForTimeout(300);
@@ -90,7 +98,7 @@ const section = t => console.log('\n' + t);
   const after = await page.textContent('#form');
   is(/Waiting on an answer/.test(after), true, 'it is now waiting on the other family');
   is(await page.evaluate(() => people().length), before, 'this tree gained nobody');
-  const theirCount = await page.evaluate(async id =>
+  const theirCount = await them.page.evaluate(async id =>
     (await fetch(`/api/tree/${id}/tree`).then(r => r.json())).people.length, otherTree);
   is(theirCount, 3, 'and the other family lost nobody');
 
@@ -100,7 +108,7 @@ const section = t => console.log('\n' + t);
     return (d.links.find(l => l.mine.name.includes(t)) || {}).id;
   }, TAG);
   is(!!linkId, true, 'the link was recorded against this run’s grandfather');
-  await page.evaluate(async ([id, link]) => {
+  await them.page.evaluate(async ([id, link]) => {
     await fetch(`/api/tree/${id}/ops`, {
       method:'POST', headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ ops: [{ op:'decideLink', linkId: link, status:'confirmed' }] })
@@ -115,11 +123,19 @@ const section = t => console.log('\n' + t);
 
   section('and each family still holds its own records');
   is(await page.evaluate(() => people().length), before, 'this tree is unchanged');
-  is(await page.evaluate(async id =>
+  is(await them.page.evaluate(async id =>
        (await fetch(`/api/tree/${id}/tree`).then(r => r.json())).people.length, otherTree), 3,
      'and so is theirs');
   is(await page.evaluate(t => people().some(p => p.name === 'Munashe ' + t), TAG), false,
      'their people did not appear in this tree');
+
+  section('and neither family can reach into the other');
+  is(await page.evaluate(async id =>
+       (await fetch(`/api/tree/${id}/tree`)).status, otherTree), 404,
+     'this family cannot read theirs');
+  is(await them.page.evaluate(async id =>
+       (await fetch(`/api/tree/${id}/tree`)).status, treeIdOfPage), 404,
+     'and theirs cannot read this one');
 
   console.log(`\n  ${pass} passed, ${fail} failed`);
   await browser.close();

@@ -3157,17 +3157,23 @@ function openTotems(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
-/* This family: the link that opens it, and how to start another.
- 
-   The honest description of the link, which the panel gives rather than
-   implies: whoever holds it can read and add to this family's tree. It is an
-   invitation, not a password — it cannot be taken back from one person
-   without changing it for everybody, and changing it is offered here with
-   that cost stated plainly rather than buried. */
+/* This family: who may open it, and how to bring a relative in.
+
+   WHAT CHANGED HERE, and why the panel reads differently. This used to show
+   the link that opened the family and say, honestly, that anybody holding it
+   could read and add. That was the whole access model and it had a cost the
+   note could only describe, not fix: a link forwarded once was a link
+   forwarded forever, and it could not be taken back from one person without
+   being taken back from everybody.
+
+   Now the family has a passcode, and this panel hands out INVITATIONS instead.
+   An invitation works once, expires, is withdrawable on its own, and does not
+   give away the passcode — so the relative who is let in cannot pass on the
+   family's own way in, and one person's link can be closed without changing
+   anybody else's. */
 function openFamily(){
   closeForm();
   pending = { kind:'dupes', anchorId: sel || state.rootId };
-  const link = familyKey ? familyLink(familyKey) : '';
 
   const el = document.createElement('div');
   el.id = 'form';
@@ -3175,41 +3181,105 @@ function openFamily(){
   el.innerHTML =
     `<p class="cap">${familyName ? esc(familyName) : 'This family'}</p>` +
 
-    (link
-      ? `<p class="lbl">The link that opens this family</p>` +
-        `<input id="famLink" class="fld" readonly value="${esc(link)}">` +
-        `<p class="covnote">Send this to your relatives and they can add to the ` +
-        `same tree. Anyone who has it can read and add — it is an invitation, ` +
-        `not a password.</p>` +
-        `<div class="row"><button class="btn ghost" id="famCopy">Copy the link</button></div>`
-      : `<p class="covnote">This deployment is serving one family.</p>`) +
+    `<p class="lbl">Bring a relative in</p>` +
+    `<p class="covnote">Makes a link for one person. It works once, it runs out ` +
+    `after a fortnight, and it does not give them the family passcode — so it ` +
+    `cannot be passed on again, and you can withdraw it on its own.</p>` +
+    `<div class="row"><button class="btn" id="famInvite">Make an invitation</button></div>` +
+    `<div id="famInviteOut"></div>` +
+
+    `<p class="lbl" style="margin-top:16px;">Invitations you have made</p>` +
+    `<div id="famInviteList"><p class="covnote">Looking…</p></div>` +
 
     `<p class="lbl" style="margin-top:16px;">Start another family</p>` +
-    `<p class="covnote">A separate tree, with its own link. Useful when the ` +
+    `<p class="covnote">A separate tree, with its own passcode. Useful when the ` +
     `people you are recording are not related to the family above — the two ` +
     `can still find each other later through <b>Other families</b>.</p>` +
     `<input id="famName" class="fld" placeholder="Whose family? e.g. the Mutasa family" autocomplete="off">` +
     `<div class="row"><button class="btn" id="famGo">Start it</button>` +
     `<button class="btn ghost" id="famNo">Close</button></div>` +
 
-    (link
-      ? `<p class="lbl" style="margin-top:16px;">If the link has gone somewhere it should not</p>` +
-        `<p class="covnote">Changing it locks out <b>everyone</b> holding the old ` +
-        `one, including your own relatives, until you send them the new one. ` +
-        `Nothing in the tree is lost.</p>` +
-        `<div class="row"><button class="btn ghost" id="famRotate">Change the link</button></div>`
-      : '');
+    `<p class="lbl" style="margin-top:16px;">If your passcode has gone somewhere it should not</p>` +
+    `<p class="covnote">Only the keeper of this site can issue a new one, and ` +
+    `nobody can read your old one back — it is not stored anywhere in a form ` +
+    `that can be read. Ask, and everyone signed in now will be signed out.</p>` +
+    `<div class="row"><button class="btn ghost" id="famAppeal">Ask the keeper</button>` +
+    `<button class="btn ghost" id="famOut">Sign out of this browser</button></div>` +
+    `<div id="famAppealOut"></div>`;
 
   document.body.appendChild(el);
   placeForm(el);
 
-  const copy = () => {
-    const f = $('famLink');
-    f.select();
-    try { document.execCommand('copy'); say('Link copied.'); }
-    catch (e) { say('Select the link and copy it.'); }
+  /* A one-time link, shown once. The server does not keep it — only a hash of
+     it — so this really is the only moment it exists. */
+  const showInvite = made => {
+    const link = location.origin + made.path;
+    $('famInviteOut').innerHTML =
+      `<input id="famLink" class="fld" readonly value="${esc(link)}">` +
+      `<p class="covnote"><b>Send this now.</b> ${esc(made.notice)}</p>` +
+      `<div class="row"><button class="btn ghost" id="famCopy">Copy the link</button></div>`;
+    $('famCopy').onclick = () => {
+      const f = $('famLink');
+      f.select();
+      try { document.execCommand('copy'); say('Link copied.'); }
+      catch (e) { say('Select the link and copy it.'); }
+    };
+    loadInvites();
   };
-  if ($('famCopy')) $('famCopy').onclick = copy;
+
+  const loadInvites = async () => {
+    const box = $('famInviteList');
+    if (!box) return;
+    try {
+      const r = await fetch('/api/invites', { headers:{ Accept:'application/json' } });
+      if (!r.ok) throw new Error('answered ' + r.status);
+      const { invites } = await r.json();
+      if (!invites.length){
+        box.innerHTML = `<p class="covnote">None yet.</p>`;
+        return;
+      }
+      box.innerHTML = invites.map(i => {
+        const state = i.revoked_at ? 'withdrawn'
+          : !i.usable ? (i.uses >= i.max_uses ? 'used' : 'ran out')
+          : 'waiting';
+        return `<p class="covnote" style="display:flex;gap:8px;align-items:baseline">` +
+          `<b>${esc(state)}</b>` +
+          `<span>${esc(i.note || 'no note')}${i.created_by ? ' · by ' + esc(i.created_by) : ''}</span>` +
+          (i.usable ? `<button class="btn ghost" data-revoke="${esc(i.id)}"
+             style="margin-left:auto;padding:2px 8px;font-size:11px">Withdraw</button>` : '') +
+        `</p>`;
+      }).join('');
+      box.querySelectorAll('[data-revoke]').forEach(b => {
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            const r = await fetch(`/api/invites/${b.dataset.revoke}/revoke`, { method:'POST' });
+            if (!r.ok) throw new Error('answered ' + r.status);
+            say('That invitation will not work now.');
+            loadInvites();
+          } catch (e) { b.disabled = false; say('That could not be withdrawn just now.'); }
+        };
+      });
+    } catch (e) {
+      box.innerHTML = `<p class="covnote">Could not read them just now.</p>`;
+    }
+  };
+  loadInvites();
+
+  $('famInvite').onclick = async () => {
+    const note = prompt('Who is this for? (only your family sees this note)') ?? '';
+    $('famInvite').disabled = true;
+    try {
+      const r = await fetch('/api/invites', {
+        method:'POST', headers:{ 'Content-Type':'application/json',
+                                 'X-Muti-Actor': meName() },
+        body: JSON.stringify({ note })
+      });
+      if (!r.ok) throw new Error('answered ' + r.status);
+      showInvite(await r.json());
+    } catch (e) { say('That invitation could not be made just now.'); }
+    $('famInvite').disabled = false;
+  };
 
   $('famGo').onclick = async () => {
     const name = $('famName').value.trim();
@@ -3223,10 +3293,24 @@ function openFamily(){
       });
       if (!r.ok) throw new Error('the server answered ' + r.status);
       const made = await r.json();
+      // The passcode is in this response and nowhere else, ever. Making the
+      // person acknowledge it before the page moves is the only protection
+      // there is against it going past unread — after the reload it is gone,
+      // and getting another means asking the keeper.
+      const seen = prompt(
+        'This is the passcode for ' + name + '.\n\n' +
+        made.passcode + '\n\n' +
+        'Write it down NOW. It cannot be shown again, and it is the only way ' +
+        'back into this family.\n\nType YES to say you have written it down.');
+      if (String(seen || '').trim().toUpperCase() !== 'YES'){
+        alert('The family has been started and the passcode still stands — but ' +
+              'nobody can show it to you again. Ask the keeper for a new one.');
+      }
+      rememberFamily(made.key);
       // Going there is a navigation, not a state change: the whole page
       // reloads onto the new family, which is the only way to be certain no
-      // part of the previous family is still on screen.
-      rememberFamily(made.key);
+      // part of the previous family is still on screen. The session moved with
+      // the request that made it, so this arrives already inside the new tree.
       location.hash = '#/f/' + made.key;
       location.reload();
     } catch (e) {
@@ -3235,20 +3319,27 @@ function openFamily(){
     }
   };
 
-  if ($('famRotate')) $('famRotate').onclick = async () => {
-    if (!confirm('Change this family\u2019s link?\n\n' +
-                 'Everyone holding the old link — including your relatives — ' +
-                 'will lose access until you send them the new one. ' +
-                 'Nothing in the tree is lost.')) return;
+  $('famAppeal').onclick = async () => {
+    const body = prompt('What has happened? The keeper will read this.');
+    if (!body || !body.trim()) return;
+    const contact = prompt('How can they reach you? (a number, or a name to ask for)') ?? '';
     try {
-      const r = await fetch(`/api/tree/${treeId}/rotate-key`, {
-        method:'POST', headers:{ 'X-Muti-Actor': meName() } });
+      const r = await fetch('/api/appeals', {
+        method:'POST', headers:{ 'Content-Type':'application/json',
+                                 'X-Muti-Actor': meName() },
+        body: JSON.stringify({ kind:'passcode', body, contact })
+      });
       if (!r.ok) throw new Error('answered ' + r.status);
-      const made = await r.json();
-      rememberFamily(made.key);
-      location.hash = '#/f/' + made.key;
-      location.reload();
-    } catch (e) { say('The link could not be changed just now.'); }
+      $('famAppealOut').innerHTML =
+        `<p class="covnote">Sent. The keeper will see it.</p>`;
+    } catch (e) { say('That could not be sent just now.'); }
+  };
+
+  $('famOut').onclick = async () => {
+    if (!confirm('Sign out of this browser?\n\nYou will need the family passcode ' +
+                 'to get back in. Nothing in the tree is lost.')) return;
+    try { await fetch('/api/sign-out', { method:'POST' }); } catch (e) {}
+    location.href = '/gate';
   };
 
   $('famNo').onclick = closeForm;

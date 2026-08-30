@@ -10,6 +10,9 @@ const { bootstrap, fullTree, publicTree, publicPerson, changesSince, search,
 const { findDuplicates } = require('../db/duplicates');
 const { findRelatives, linksFor } = require('../db/crosstree');
 const { OpError } = require('../db/errors');
+const { requireOwnTree } = require('../auth');
+const access = require('../db/access');
+const audit = require('../db/audit');
 
 function sendError(res, e) {
   if (e instanceof OpError) {
@@ -42,26 +45,47 @@ function sendError(res, e) {
 }
 
 // Who made a change. Purely for the changes log's `by` column — it is not
-// identity and grants nothing. Real access control is the passphrase gate.
+// identity and grants nothing. Real access control is the gate, and which
+// family you are in is `own` below.
 const actorOf = req => String(req.get('x-muti-actor') || req.body?.by || '').slice(0, 120);
+
+/* EVERY ROUTE THAT NAMES A TREE IS GUARDED BY THIS.
+
+   Getting through the gate says you belong to A family. `own` says you belong
+   to THIS one. Without it the per-family passcodes would decide who gets in
+   and then any signed-in visitor could still ask for /api/tree/<any id>/tree —
+   which is the old single deployment-wide passphrase again, wearing a
+   passcode's clothes.
+
+   It is applied per route rather than to the whole router because two routes
+   here deliberately do not take a tree id (/home, /trees) and one takes a key
+   instead (/family/:key); a blanket r.use() would silently do nothing for
+   those three and read as though it had covered them. */
+const own = requireOwnTree('id');
 
 module.exports = function treeRoutes(pool, homeTreeId = null) {
   const r = express.Router();
 
-  /* Which tree this deployment serves, so the page does not have to be
-     configured with a UUID. Settled once at boot. */
+  /* Which family this visitor is in.
+
+     THE SESSION DECIDES, not the deployment. Before per-family passcodes there
+     was one tree and this returned it; now the passcode somebody signed in
+     with says which family they are, and this reports that. homeTreeId remains
+     the fallback for the one case that has no family session of its own: a
+     deployment with no gate at all, run locally to look at. */
   r.get('/home', async (req, res) => {
-    if (!homeTreeId) {
+    const treeId = req.muti?.treeId || homeTreeId;
+    if (!treeId) {
       return res.status(503).json({
         error: 'no_tree', message: 'the server has not finished choosing a tree' });
     }
     try {
-      // The home family's own key travels with it, so the first person to open
-      // the deployment has a link to share without having to go and find one.
       const { rows } = await pool.query(
-        'SELECT id, key, name FROM trees WHERE id = $1', [homeTreeId]);
-      res.json(rows.length ? { treeId: rows[0].id, key: rows[0].key, name: rows[0].name }
-                           : { treeId: homeTreeId });
+        'SELECT id, key, name, handle FROM trees WHERE id = $1', [treeId]);
+      res.json(rows.length
+        ? { treeId: rows[0].id, key: rows[0].key, name: rows[0].name,
+            handle: rows[0].handle, via: req.muti?.session?.via || '' }
+        : { treeId });
     } catch (e) { sendError(res, e); }
   });
 
@@ -70,20 +94,28 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
      The page is an editor, not a viewer: it derives kinship, generations,
      duplicates and layout from the whole graph, and a partial graph gives
      wrong answers rather than missing ones. */
-  r.get('/tree/:id/tree', async (req, res) => {
+  r.get('/tree/:id/tree', own, async (req, res) => {
     try {
       res.json(await fullTree(pool, req.params.id));
     } catch (e) { sendError(res, e); }
   });
 
-  /* Deliberately does NOT list the keys.
- 
-     The key is the credential that opens a family's tree. An endpoint that
-     hands out every key would make every family readable by anybody through
-     the gate, which is the whole thing the keys exist to prevent. Names and
-     sizes are enough to say "these families are here"; opening one needs the
-     link its family gave you. */
-  r.get('/trees', async (req, res) => {
+  /* The list of families — ADMIN ONLY, since per-family passcodes.
+
+     It used to be readable by anyone through the gate, on the reasoning that
+     names and sizes are not much and opening one still needed its key. That
+     reasoning does not survive the passcodes: the whole promise now is that a
+     family's existence and size is theirs, and a list of every family on the
+     deployment is the one thing that makes a passcode look like a formality.
+     The admin's own view of this is /api/admin/families. */
+  r.get('/trees', (req, res, next) => {
+    if (req.muti?.scope === 'admin') return next();
+    return res.status(403).json({
+      error: 'not_admin',
+      message: 'The families on this deployment are not listed. Open yours with ' +
+               'its passcode, or an invitation from somebody in it.'
+    });
+  }, async (req, res) => {
     try {
       const { rows } = await pool.query(`
         SELECT t.id, t.name, t.created_at,
@@ -94,34 +126,87 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
     } catch (e) { sendError(res, e); }
   });
 
-  /* Start a family. Returns the key once, in the response that creates it —
-     the only time the server volunteers a key it was not already given. */
+  /* Start a family.
+
+     Three things happen together, and they have to: the tree is made, it is
+     given a passcode, and the caller is moved into it. Making a family without
+     a passcode would leave a tree nobody could ever open again; making one
+     without moving the session would leave the person who started it locked
+     out of the family they just started, since their session is scoped to the
+     family they were in.
+
+     THE PASSCODE IS IN THIS RESPONSE AND NOWHERE ELSE. It is stored as a
+     scrypt hash, so it cannot be read back — by the family, by the admin, or
+     by anybody who reaches the database. Losing it means being issued another,
+     which is what the admin is for. */
   r.post('/trees', async (req, res) => {
     try {
       const name = String(req.body?.name || '').trim().slice(0, 200) || 'A family';
       const by = actorOf(req);
       const { rows } = await pool.query(
         `INSERT INTO trees (name, created_by) VALUES ($1, $2)
-         RETURNING id, key, name, created_at`, [name, by]);
-      res.status(201).json(rows[0]);
+         RETURNING id, key, name, handle, created_at`, [name, by]);
+      const made = rows[0];
+
+      const issued = await access.issuePasscode(pool, made.id, { by });
+      const session = await access.createSession(pool, {
+        scope: 'family', treeId: made.id, via: 'created',
+        passcodeGen: issued.passcode_gen, actor: by,
+        ip: audit.clientIp(req), userAgent: audit.uaOf(req)
+      });
+      res.cookie('muti_gate', session.cookie, {
+        httpOnly: true, sameSite: 'lax',
+        secure: req.secure || req.headers['x-forwarded-proto'] === 'https',
+        maxAge: access.SESSION_DAYS * 24 * 60 * 60 * 1000, path: '/'
+      });
+
+      await audit.record(pool, audit.from(req, {
+        kind: 'family.created', ok: true, treeId: made.id, actor: by,
+        sessionId: session.id, detail: { name: made.name, handle: made.handle } }));
+      await audit.record(pool, audit.from(req, {
+        kind: 'passcode.set', ok: true, treeId: made.id, actor: by,
+        sessionId: session.id, detail: { generation: issued.passcode_gen } }));
+
+      res.status(201).json({
+        ...made, passcode: issued.passcode,
+        notice: 'Write this down now. It is the only time it can be shown, and ' +
+                'it is the only way back into this family. Nobody can read it ' +
+                'back for you — not even the keeper of this deployment, who can ' +
+                'only issue a new one.'
+      });
     } catch (e) { sendError(res, e); }
   });
 
-  /* Open a family by its key. The key is in the path rather than a query
-     string because query strings are the part of a URL that leaks most
-     readily into logs and referrer headers — and this one is a credential. */
+  /* Look a family up by its key.
+
+     THE KEY NO LONGER OPENS ANYTHING. It used to be the credential: hold the
+     link, hold the tree. Per-family passcodes replace that, and this is now a
+     lookup that answers only for the family the caller is already in — which
+     is what the page needs it for, to turn a remembered link into a name.
+
+     A key belonging to somebody else's family gets the same 404 as a key that
+     never existed. That is the honest consequence of the change: links shared
+     before this are no longer a way in, and an invitation is. */
   r.get('/family/:key', async (req, res) => {
     try {
       const key = String(req.params.key || '');
       const { rows } = await pool.query(
         'SELECT id, name, created_at FROM trees WHERE key = $1', [key]);
+      // A FAMILY SESSION, AND ITS OWN FAMILY. An admin is refused here too:
+      // the keeper's view of a family is /api/admin/families, which gives sizes
+      // and dates and no way into the tree. Two doors onto the same question
+      // is how one of them ends up with the weaker rule.
+      if (rows.length && !(req.muti?.scope === 'family' && req.muti.treeId === rows[0].id)) {
+        rows.length = 0;
+      }
       if (!rows.length) {
         // The same answer whether the key never existed or has been changed:
         // anything finer helps somebody work out which keys are real.
         return res.status(404).json({
           error: 'no_such_family',
           message: 'No family answers to that link. It may have been changed, ' +
-                   'or copied incompletely.'
+                   'copied incompletely, or belong to a family you are not in — ' +
+                   'a link is no longer a way in; ask them for an invitation.'
         });
       }
       res.json({ treeId: rows[0].id, name: rows[0].name, key });
@@ -131,22 +216,37 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
   /* Change a family's key, locking out everyone holding the old one. A
      deliberate act with a real cost, so it says what the cost is and hands
      back the new link exactly once. */
-  r.post('/tree/:id/rotate-key', async (req, res) => {
+  r.post('/tree/:id/rotate-key', own, async (req, res) => {
     try {
       const { rows } = await pool.query(
         `UPDATE trees SET key = mw_new_tree_key(), key_set_at = clock_timestamp()
           WHERE id = $1 RETURNING id, key, name`, [req.params.id]);
       if (!rows.length) return res.status(404).json({ error: 'no_such_family' });
+      await audit.record(pool, audit.from(req, {
+        kind: 'family.key_rotated', ok: true, treeId: req.params.id,
+        actor: actorOf(req), sessionId: req.muti?.session?.id }));
       res.json(rows[0]);
     } catch (e) { sendError(res, e); }
   });
 
   // The write path. An array of operations, applied in one transaction, all or
   // nothing. Returns the new seq and the map of local refs to minted ids.
-  r.post('/tree/:id/ops', async (req, res) => {
+  r.post('/tree/:id/ops', own, async (req, res) => {
     try {
       const ops = Array.isArray(req.body) ? req.body : req.body?.ops;
       const result = await applyOps(pool, req.params.id, ops, actorOf(req));
+      // WHAT was done, coarsely. The `changes` table already holds every edit
+      // in full; recording the detail again here would be two records of one
+      // act that can disagree. This says a batch arrived, from where, and of
+      // what kinds — which is what makes an edit findable in the record beside
+      // the sign-in that preceded it.
+      audit.record(pool, audit.from(req, {
+        kind: 'tree.ops', ok: true, treeId: req.params.id, actor: actorOf(req),
+        sessionId: req.muti?.session?.id,
+        detail: { count: Array.isArray(ops) ? ops.length : 0,
+                  kinds: [...new Set((ops || []).map(o => o && o.op).filter(Boolean))],
+                  seq: result?.seq }
+      })).catch(() => {});
       res.json(result);
     } catch (e) { sendError(res, e); }
   });
@@ -154,7 +254,7 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
   // The neighbourhood around one person, not the whole tree. This is the call
   // that has to stay fast as the tree grows — the client shows one corner of
   // the family, so it should load one corner of the family.
-  r.get('/tree/:id/bootstrap', async (req, res) => {
+  r.get('/tree/:id/bootstrap', own, async (req, res) => {
     try {
       res.json(await bootstrap(pool, req.params.id, {
         focus: req.query.focus || null,
@@ -165,13 +265,13 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
 
   // Incremental sync. The client holds a seq and asks for what it is missing,
   // rather than re-fetching a tree it already mostly has.
-  r.get('/tree/:id/changes', async (req, res) => {
+  r.get('/tree/:id/changes', own, async (req, res) => {
     try {
       res.json(await changesSince(pool, req.params.id, req.query.since, req.query.limit));
     } catch (e) { sendError(res, e); }
   });
 
-  r.get('/tree/:id/search', async (req, res) => {
+  r.get('/tree/:id/search', own, async (req, res) => {
     try {
       res.json(await search(pool, req.params.id, req.query.q, { limit: req.query.limit }));
     } catch (e) { sendError(res, e); }
@@ -180,7 +280,7 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
   // Duplicate candidates. Runs on the server, on demand — never inside a
   // render. The old client scored every person against every other one on
   // every frame, which at 3,000 people is 4.5 million comparisons per frame.
-  r.get('/tree/:id/duplicates', async (req, res) => {
+  r.get('/tree/:id/duplicates', own, async (req, res) => {
     try {
       res.json(await findDuplicates(pool, req.params.id, {
         threshold: req.query.threshold ? Number(req.query.threshold) : undefined,
@@ -195,7 +295,7 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
      ?recordedBy=<name> is the notice feed: "entries of yours that somebody
      has taken out of the tree, and why". It is a plain read of live state, so
      it is always current and never needs marking as seen. */
-  r.get('/tree/:id/set-aside', async (req, res) => {
+  r.get('/tree/:id/set-aside', own, async (req, res) => {
     try {
       const recordedBy = req.query.recordedBy;
       res.json(await setAsideList(pool, req.params.id,
@@ -209,7 +309,7 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
      dates that change as families record more, so a stored match would be a
      stored answer going stale. What gets stored is a human's decision about
      one, which does not. */
-  r.get('/tree/:id/relatives', async (req, res) => {
+  r.get('/tree/:id/relatives', own, async (req, res) => {
     try {
       res.json(await findRelatives(pool, req.params.id, {
         threshold: req.query.threshold ? Number(req.query.threshold) : undefined,
@@ -219,7 +319,7 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
   });
 
   /* Links already proposed, confirmed or rejected, from this tree's side. */
-  r.get('/tree/:id/links', async (req, res) => {
+  r.get('/tree/:id/links', own, async (req, res) => {
     try {
       const status = req.query.status ? String(req.query.status) : null;
       res.json({ treeId: req.params.id, links: await linksFor(pool, req.params.id, status) });
@@ -239,6 +339,11 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
 module.exports.publicRoutes = function publicRoutes(pool) {
   const r = express.Router();
 
+  // No `own` here, and there must never be one. This router is mounted OUTSIDE
+  // the gate: it is the world's view, and the world has no session to own a
+  // family with. What keeps it safe is not a guard but what it calls —
+  // publicTree and publicPerson have no parameter that could return a private
+  // person.
   r.get('/tree/:id', async (req, res) => {
     try { res.json(await publicTree(pool, req.params.id)); }
     catch (e) { sendError(res, e); }

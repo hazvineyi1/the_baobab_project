@@ -1,22 +1,25 @@
-// Two families on one deployment, in the browser.
+// Many families on one deployment, and the wall between them.
 //
-// The point of the whole cross-tree feature was that a family had to be able
-// to have a tree of their own before there was ever a second family to match
-// against. These drive that: someone starts a family, gets a link, and what
-// they record is not visible to the deployment's other family.
+// REWRITTEN FOR PASSCODES. This suite used to assert the opposite of most of
+// what it asserts now, and that is the point rather than a problem: the old
+// model was that a family's link WAS its credential, so the suite proved that
+// a link opened the family it named, from any browser, and that changing the
+// link was the only way to take that back.
 //
-// Also asserts the thing that makes it usable at all — that a link opens the
-// family it names, and that a browser remembers which family it was in.
+// Per-family passcodes replace that. A link is no longer a way in; an
+// invitation is. So the same situations are here — a relative opening a link
+// they were sent, a browser coming back later, a link that has gone somewhere
+// it should not — with the answers the new model gives, which are mostly the
+// opposite ones.
 //
 // Not part of `npm test` — needs Chromium and a live server. Run:
 //
 //   DATABASE_URL=... PORT=3940 node server.js &
-//   MW_BASE_URL=http://127.0.0.1:3940/ NODE_PATH=$(npm root -g) \
-//     node test/browser/multifamily.js
+//   MW_BASE_URL=http://127.0.0.1:3940/ APP_PASSPHRASE=... \
+//     NODE_PATH=$(npm root -g) node test/browser/multifamily.js
 
 const { chromium } = require('playwright');
-
-const { BASE, EXE, openApp, enter, onlyThisOrigin, ready, settled } = require('./lib');
+const { BASE, EXE, openApp, onlyThisOrigin, enter, ready, settled } = require('./lib');
 
 let pass = 0, fail = 0;
 const ok  = m => { pass++; console.log('  ok   ' + m); };
@@ -35,49 +38,59 @@ const section = t => console.log('\n' + t);
     return { ctx, page };
   };
 
-  // ── the deployment's default family ──────────────────────────────────
-  section('opening the address lands in a family with a shareable link');
-  const home = await open();
-  const homeTree = await home.page.evaluate(() => treeId);
-  const homeKey  = await home.page.evaluate(() => familyKey);
-  is(/^[a-z2-9]{20,}$/.test(homeKey || ''), true, 'it has a key: ' + homeKey);
-  // On an empty family the toolbar is hidden, so the way in is the line on
-  // the planting screen; on a filled one it is the toolbar button. Both must
-  // open the same panel.
+  // On an empty family the toolbar is hidden, so the way in is the line on the
+  // planting screen; on a filled one it is the toolbar button. Both open the
+  // same panel.
   const openFamilyPanel = async page => {
     if (await page.isVisible('#family')) await page.click('#family');
     else await page.click('#seedFamilyGo');
-    await page.waitForSelector('#famLink');
+    await page.waitForSelector('#famInvite');
   };
-  is(await home.page.isVisible('#seedFamily') || await home.page.isVisible('#family'),
-     true, 'and a way to see it');
+
+  // ── the deployment's default family ──────────────────────────────────
+  section('opening the address lands in a family');
+  const home = await open();
+  const homeTree = await home.page.evaluate(() => treeId);
+
   await openFamilyPanel(home.page);
-  const shown = await home.page.inputValue('#famLink');
-  is(shown.includes('#/f/' + homeKey), true, 'the panel shows the link: ' + shown);
   const words = await home.page.textContent('#form');
-  is(/invitation, not a password/.test(words), true,
-     'and says plainly what holding it means');
+  is(/Bring a relative in/.test(words), true, 'the panel offers to invite somebody');
+  is(/does not give them the family passcode/.test(words), true,
+     'and says what an invitation is not');
+  is(await home.page.isVisible('#famLink'), false,
+     'no link is shown until one is made — there is no standing link any more');
 
   // ── starting a second family ─────────────────────────────────────────
   section('a relative of another house starts their own family');
+  // Starting one hands back a passcode ONCE, in a prompt that has to be
+  // acknowledged. The suite answers it the way a person would.
+  let shownPasscode = null;
+  home.page.on('dialog', d => {
+    if (/passcode for/i.test(d.message())) {
+      const m = d.message().match(/\n\n(\S+-\S+-\S+)\n\n/);
+      if (m) shownPasscode = m[1];
+      return d.accept('YES');
+    }
+    d.accept('');
+  });
+
   await home.page.fill('#famName', TAG + ' family');
   await Promise.all([
     home.page.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
     home.page.click('#famGo')
   ]);
   await ready(home.page);
+
   const newTree = await home.page.evaluate(() => treeId);
-  const newKey  = await home.page.evaluate(() => familyKey);
   is(newTree !== homeTree, true, 'it is a different tree');
-  is(newKey !== homeKey, true, 'with a different key');
   is(await home.page.evaluate(() => people().length), 0, 'and it starts empty');
-  // An empty family is exactly when the link needs sending round, and it is
-  // also when the toolbar is hidden — so the way to it has to be on this
-  // screen too.
-  is(await home.page.isVisible('#seedFamily'), true,
-     'the empty family still offers its link');
-  is((await home.page.evaluate(() => location.hash)), '#/f/' + newKey,
-     'the address names the family you are in');
+  is(/^[a-z2-9]{6}-[a-z2-9]{6}-[a-z2-9]{6}$/.test(shownPasscode || ''), true,
+     'a passcode was shown, once: ' + (shownPasscode ? shownPasscode.slice(0, 7) + '…' : 'none'));
+
+  section('the session moved with them');
+  is(await home.page.evaluate(async id =>
+       (await fetch(`/api/tree/${id}/tree`)).status, homeTree), 404,
+     'the family they came from is now closed to them');
 
   section('what they record stays in their own family');
   await home.page.evaluate(t => {
@@ -86,26 +99,95 @@ const section = t => console.log('\n' + t);
   }, TAG);
   await home.page.waitForTimeout(1800);
   is(await home.page.evaluate(() => people().length), 1, 'recorded here');
-  const inOldFamily = await home.page.evaluate(async ([id, t]) => {
-    const d = await fetch(`/api/tree/${id}/tree`).then(r => r.json());
-    return d.people.some(p => p.name.includes(t));
-  }, [homeTree, TAG]);
-  is(inOldFamily, false, 'and nowhere near the other family');
 
-  section('the link opens the family it names, from a browser that has never seen it');
-  const guest = await open(BASE + '#/f/' + newKey);
-  is(await guest.page.evaluate(() => treeId), newTree, 'the guest lands in the right family');
-  is(await guest.page.evaluate(t => people().some(p => p.name.includes(t)), TAG), true,
-     'and sees what was recorded');
+  // ── an invitation, which is now the way in ───────────────────────────
+  section('they invite a relative');
+  await openFamilyPanel(home.page);
+  await home.page.click('#famInvite');
+  await home.page.waitForSelector('#famLink', { timeout: 10000 });
+  const inviteLink = await home.page.inputValue('#famLink');
+  is(/\/join\//.test(inviteLink), true, 'the panel hands back a one-time link');
+  const joinPath = inviteLink.slice(inviteLink.indexOf('/join/'));
 
-  section('and that browser comes back to it without the link');
-  // The same browser, going to the bare address — a relative who bookmarked
-  // the site rather than the link, or who typed it from memory.
-  await guest.page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await ready(guest.page);
-  is(await guest.page.evaluate(() => treeId), newTree,
-     'it remembered, rather than dropping into the deployment default');
-  await guest.ctx.close();
+  section('a link preview does not spend it');
+  // WhatsApp fetches a link before any human clicks it. A single-use
+  // invitation consumed by a preview is one the relative never gets.
+  const crawler = await browser.newContext();
+  await onlyThisOrigin(crawler);
+  const crawlPage = await crawler.newPage();
+  await crawlPage.goto(BASE.replace(/\/$/, '') + joinPath, { waitUntil:'domcontentloaded' });
+  is(/You have been invited/.test(await crawlPage.textContent('body')), true,
+     'the crawler gets a page');
+  is(await crawlPage.isVisible('button[type=submit]'), true,
+     'with the taking-up left to a button');
+  await crawler.close();
+
+  section('the relative takes it up, from a browser that has never been here');
+  const guest = await browser.newContext();
+  await onlyThisOrigin(guest);
+  const guestPage = await guest.newPage();
+  await guestPage.goto(BASE.replace(/\/$/, '') + joinPath, { waitUntil:'domcontentloaded' });
+  await Promise.all([
+    guestPage.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    guestPage.click('button[type=submit]')
+  ]);
+  await ready(guestPage);
+  is(await guestPage.evaluate(() => treeId), newTree, 'they land in the right family');
+  is(await guestPage.evaluate(t => people().some(p => p.name.includes(t)), TAG), true,
+     'and see what was recorded');
+
+  section('and that browser comes back without the link');
+  await guestPage.goto(BASE, { waitUntil:'domcontentloaded' });
+  await ready(guestPage);
+  is(await guestPage.evaluate(() => treeId), newTree,
+     'the session remembered, rather than dropping into the deployment default');
+
+  section('the same invitation does not work twice');
+  const second = await browser.newContext();
+  await onlyThisOrigin(second);
+  const secondPage = await second.newPage();
+  await secondPage.goto(BASE.replace(/\/$/, '') + joinPath, { waitUntil:'domcontentloaded' });
+  await secondPage.click('button[type=submit]').catch(() => {});
+  await secondPage.waitForTimeout(600);
+  is(/cannot be used/.test(await secondPage.textContent('body')), true,
+     'it says so, and offers nothing');
+  await second.close();
+
+  section('an invitation that has been withdrawn stops working');
+  await openFamilyPanel(home.page);
+  await home.page.click('#famInvite');
+  await home.page.waitForSelector('#famLink', { timeout: 10000 });
+  const doomed = await home.page.inputValue('#famLink');
+  const doomedPath = doomed.slice(doomed.indexOf('/join/'));
+  await home.page.waitForSelector('#famInviteList [data-revoke]', { timeout: 10000 });
+  await home.page.click('#famInviteList [data-revoke]');
+  await home.page.waitForTimeout(900);
+
+  const withdrawn = await browser.newContext();
+  await onlyThisOrigin(withdrawn);
+  const wPage = await withdrawn.newPage();
+  await wPage.goto(BASE.replace(/\/$/, '') + doomedPath, { waitUntil:'domcontentloaded' });
+  await wPage.click('button[type=submit]').catch(() => {});
+  await wPage.waitForTimeout(600);
+  is(/cannot be used/.test(await wPage.textContent('body')), true,
+     'withdrawn, and it says so without saying which invitation it was');
+  await withdrawn.close();
+
+  // ── what a link no longer does ───────────────────────────────────────
+  section('A SHARING LINK IS NO LONGER A WAY IN');
+  // The change that costs something, asserted rather than left implied: a
+  // #/f/<key> link forwarded to somebody outside the family opens nothing.
+  const newKey = await home.page.evaluate(() => familyKey);
+  const outsider = await browser.newContext();
+  await onlyThisOrigin(outsider);
+  const outPage = await outsider.newPage();
+  await enter(outPage, BASE + '#/f/' + newKey);       // signs in as the HOME family
+  await settled(outPage);
+  is(await outPage.evaluate(() => treeId) === newTree, false,
+     'the link did not put them in that family');
+  is(await outPage.evaluate(t => people().some(p => p.name.includes(t)), TAG), false,
+     'and none of its people came with it');
+  await outsider.close();
 
   section('a link that names no family says so, and saves nothing');
   const lost = await browser.newContext();
@@ -118,28 +200,20 @@ const section = t => console.log('\n' + t);
      'and explains why');
   await lost.close();
 
-  section('changing the link locks the old one out');
-  home.page.on('dialog', d => d.accept());
-  await openFamilyPanel(home.page);
-  await home.page.waitForSelector('#famRotate');
+  // ── leaving ──────────────────────────────────────────────────────────
+  section('signing out ends that browser and nothing else');
+  await openFamilyPanel(guestPage);
+  guestPage.on('dialog', d => d.accept());
   await Promise.all([
-    home.page.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
-    home.page.click('#famRotate')
+    guestPage.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    guestPage.click('#famOut')
   ]);
-  await ready(home.page);
-  const rotated = await home.page.evaluate(() => familyKey);
-  is(rotated !== newKey, true, 'a new key was issued');
-  is(await home.page.evaluate(() => treeId), newTree, 'the same family, though');
-  is(await home.page.evaluate(t => people().some(p => p.name.includes(t)), TAG), true,
-     'with everybody still in it');
-
-  const stale = await browser.newContext();
-  await onlyThisOrigin(stale);
-  const stalePage = await stale.newPage();
-  await enter(stalePage, BASE + '#/f/' + newKey);
-  await settled(stalePage);
-  is(await stalePage.evaluate(() => store), 'stalled', 'the old link no longer opens it');
-  await stale.close();
+  await guestPage.waitForTimeout(500);
+  is(/passcode/i.test(await guestPage.textContent('body')), true,
+     'that browser is back at the door');
+  is(await home.page.evaluate(() => people().length), 1,
+     'and the family still has everything it had');
+  await guest.close();
 
   await home.ctx.close();
   console.log(`\n  ${pass} passed, ${fail} failed`);

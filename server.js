@@ -15,9 +15,12 @@ const path = require('path');
 const { createPool } = require('./db/pool');
 const { migrate } = require('./db/migrate');
 const treeRoutes = require('./routes/tree');
+const adminRoutes = require('./routes/admin');
+const familyRoutes = require('./routes/family');
 const { trigramAvailable } = require('./db/reads');
 const { ensureHomeTree } = require('./db/home');
-const { gate } = require('./auth');
+const { gate, requireAdmin } = require('./auth');
+const audit = require('./db/audit');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -26,6 +29,14 @@ app.use(express.urlencoded({ extended: false, limit: '4kb' }));
 
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
+
+/* The gate is mounted before the database is ready — it has to be, so that no
+   route added later can end up outside it. It therefore reads these through
+   getters rather than being handed values that do not exist yet. Nothing can
+   arrive before they are set: app.listen only runs once setupDatabase has
+   resolved. */
+let pool = null;
+let homeTreeId = null;
 
 // Railway terminates TLS in front of this process, so req.secure is only true
 // if Express is told to believe the proxy's header. Without this the session
@@ -63,8 +74,14 @@ app.use('/public', publicRouter);
    The passphrase itself comes from the environment and appears nowhere else:
    not in this repository, not in a log line, not in an error message. */
 app.use(gate({
+  // The old deployment-wide passphrase. Still opens the home family, so this
+  // change signs nobody out; every other family now has its own passcode.
   passphrase: process.env.APP_PASSPHRASE,
-  hasDatabase: !!DATABASE_URL
+  // The keeper of this deployment. Opens the admin pages and NO family's tree.
+  adminPassphrase: process.env.MW_ADMIN_PASSPHRASE,
+  hasDatabase: !!DATABASE_URL,
+  getPool: () => pool,
+  getHomeTreeId: () => homeTreeId
 }));
 
 // The old whole-tree blob API (/api/shared/:key). OFF by default now that the
@@ -85,7 +102,7 @@ let db; // { get(key), set(key,value), del(key), list(prefix) }
 
 async function setupDatabase() {
   if (DATABASE_URL) {
-    const pool = createPool(DATABASE_URL);
+    pool = createPool(DATABASE_URL);
 
     // Bring the real relational schema up to date on every boot. The blob
     // key/value API below still runs on kv_store and is untouched by this —
@@ -97,11 +114,32 @@ async function setupDatabase() {
     // throws rather than returning if the carry-over fails, so a broken move
     // stops the deploy instead of serving the family an empty page.
     const home = await ensureHomeTree(pool);
+    homeTreeId = home.treeId;
+
+    // Monthly partitions for the record of who did what. The default partition
+    // means a failure here costs query speed rather than data, which is why
+    // this never throws.
+    await audit.ensurePartitions(pool);
 
     // The relational API. Only available with a real database — the in-memory
     // fallback below exists so `npm start` works for a quick look, and it
     // cannot support transactions, constraints or incremental sync.
     app.use('/api', treeRoutes(pool, home.treeId));
+
+    // A family's own way in: invitations, appeals, signing out. Scoped to the
+    // caller's own family from the session, never from a parameter.
+    app.use(familyRoutes(pool));
+
+    // The keeper's pages. requireAdmin sits between the gate and these, so a
+    // family session that has got this far is refused rather than served the
+    // dashboard — being through the gate is not the same as being the admin.
+    if (process.env.MW_ADMIN_PASSPHRASE) {
+      app.use(adminOnly, adminRoutes(pool));
+      console.log('Admin dashboard is on at /admin.');
+    } else {
+      console.log('No MW_ADMIN_PASSPHRASE set — the admin dashboard is off, and ' +
+                  'no family passcodes can be issued.');
+    }
 
     if (PUBLIC_READ) {
       publicRouter.use(treeRoutes.publicRoutes(pool));
@@ -212,6 +250,21 @@ async function warnIfBlobApiIsNowDangerous(pool) {
   } else {
     console.log('Blob API is off (MW_BLOB_API=off) — the tables are the only copy.');
   }
+}
+
+/* The admin guard, applied to the two path shapes the dashboard uses: the page
+   itself at /admin, and its API under /api/admin.
+
+   Written as one middleware that CALLS requireAdmin rather than as a mount
+   path, because the router serves both shapes and mounting it twice would run
+   the guard twice; and calling next() for everything else rather than
+   next('router'), which at this level would skip the rest of the application —
+   the static files included. */
+function adminOnly(req, res, next) {
+  if (req.path === '/admin' || req.path.startsWith('/api/admin')) {
+    return requireAdmin(req, res, next);
+  }
+  return next();
 }
 
 // ---- API ----

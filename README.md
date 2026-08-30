@@ -68,12 +68,28 @@ anyone with the link. Don't put sensitive personal information in it.
    storage and the whole tree resets every time it restarts or redeploys
    — check the deploy logs and you'll see a warning if that's happening.
 
-5. **Get a public URL.**
+5. **Set the keeper's passphrase.**
+   Still in **Variables**, add `MW_ADMIN_PASSPHRASE`. This is yours, not
+   the family's: it opens the dashboard at `/admin`, where you issue
+   families their passcodes, read the record of who did what, and answer
+   appeals. It opens **no family's tree** — see *Access* below.
+
+   Pick something long and type it nowhere else. It is never committed:
+   this repository is public. Without it the dashboard is off and no
+   family passcodes can be issued.
+
+6. **Get a public URL.**
    Open your app service → **Settings → Networking → Public Networking**
    → **Generate Domain**. That's the link you share with family.
 
-6. **Open it and try it.** Add a person, refresh the page — it should
+7. **Open it and try it.** Add a person, refresh the page — it should
    still be there. That confirms Postgres is wired up correctly.
+
+8. **Issue the first family its passcode.** Go to `/admin`, sign in with
+   `MW_ADMIN_PASSPHRASE`, find the family in the list and press *Issue a
+   new passcode*. It is shown **once** — write it down before closing
+   the box. Nobody can read it back afterwards, you included; a lost
+   passcode is replaced, never recovered.
 
 ## Local development
 
@@ -92,13 +108,19 @@ server.js`, after `npm install dotenv`).
 ## Project layout
 
 ```
-server.js          Express server: the gate, then the API, then the page
-auth.js            The passphrase gate
-db/                pool, migrations runner, ops, reads, duplicates, crosstree
-migrations/        numbered SQL, applied on boot, recorded in schema_migrations
-routes/tree.js     the HTTP surface for one tree
-public/index.html  The entire frontend — tree UI, kinship-term engine, styling
-test/              suites; test/browser/ needs Chromium and a live server
+server.js            Express server: the gate, then the API, then the page
+auth.js              The gate: family passcodes, invitations, the admin door
+db/access.js         passcodes, sessions, invitations
+db/audit.js          the record of who did what, when and from where
+db/admin.js          what the keeper can see; db/appeals.js what they answer
+db/                  pool, migrations runner, ops, reads, duplicates, crosstree
+migrations/          numbered SQL, applied on boot, recorded in schema_migrations
+routes/tree.js       the HTTP surface for one tree
+routes/family.js     a family's own invitations, appeals and sign-out
+routes/admin.js      the keeper's surface
+admin/dashboard.html The keeper's page. NOT in public/ — see the note in it
+public/index.html    The entire frontend — tree UI, kinship-term engine, styling
+test/                suites; test/browser/ needs Chromium and a live server
 package.json
 .env.example
 ```
@@ -108,37 +130,87 @@ package.json
 - **Accounts**: identity is self-claimed — you tap your own name in the tree,
   and that name is stamped on what you record. Good enough to say who entered
   a relative and who to tell before setting one aside; not enough to *prove*
-  anybody is who they say. Real accounts would sit on top of the family keys
-  below, which stay as the invitation either way.
+  anybody is who they say. Real accounts would sit on top of the passcodes and
+  invitations below, which stay as the way a family lets somebody in either way.
+- **More than one keeper**: `MW_ADMIN_PASSPHRASE` is one shared secret, so two
+  people using it are told apart only by the session and address beside each
+  line in the record. A keepers table would be the next step; the audit trail
+  is already shaped for it.
 - **Backups**: Railway's Postgres has automatic backups, but it's worth
   knowing where to find them before you need them.
 
 ## Access, and exactly what it is worth
 
-Two layers, and it is worth being precise about both, because neither is an
-account system.
+Three doors, and it is worth being precise about all three.
 
-**The passphrase gate** (`APP_PASSPHRASE`) answers "may this person use this
-deployment at all". Everyone types it once; the browser then holds a signed,
-expiring cookie. It stops crawlers, scrapers and anybody who is merely sent
-the address. It does not stop somebody who was given the passphrase and should
-not have been — a shared secret is only as private as the people sharing it.
+**A family passcode** answers "which family is this, and do you belong to it".
+It looks like `handle-xxxxxx-xxxxxx`. The first group is the family's handle,
+stored in the clear so the server knows which family to check; the rest is the
+secret, about 59 bits of it, and it is stored **only as a scrypt hash**.
 
-Set it in the deployment's environment variables and nowhere else. It is never
-committed: this repository is public. **Without it, a deployment that has a
-database refuses to serve the tree** rather than serving it openly — running
-locally with no database, the gate stays out of the way.
+That last part has a consequence stated here rather than discovered later:
+**nobody can read a passcode back — the keeper included.** A lost passcode is
+replaced, never recovered. The alternative would be a table of every family's
+passcode in plaintext, which turns one breach into every family's records at
+once.
 
-**A family key** answers "which family's tree is this". Each tree has one, and
-it lives in the address: `…/#/f/<key>`. Hold the key and you can read and add
-to that family's tree; without it you cannot even find it, because nothing
-lists keys and they are too long to guess. That is capability access:
+Holding a family's passcode opens that family and nothing else. It does not
+list the other families, and it cannot read or write one — every route that
+names a tree is checked against the session's own.
 
-- anyone the link is passed to has exactly the access of whoever passed it,
-  and there is no way to tell them apart afterwards;
-- it cannot be taken back from one person without changing it for everybody
-  (which the app offers, saying plainly what it costs).
+**An invitation** is how a family brings a relative in without the passcode
+travelling through a group chat. It is a link, single-use and expiring by
+default, withdrawable on its own, and attributable to whoever made it. The
+relative who is let in cannot pass on the family's own way in.
 
-What it buys is that one family's records stop being visible to every other
-family on the deployment — and that a relative can start recording their
-grandmother without an email address, a password, or a sign-up first.
+Note what an invitation is *not*: a family key (`…/#/f/<key>`) is no longer a
+way in. It used to be — hold the link, hold the tree — and that is precisely
+what the passcodes replace. A key is now a label a family uses for its own
+tree, and a key belonging to somebody else's family opens nothing.
+
+**The keeper's passphrase** (`MW_ADMIN_PASSPHRASE`) opens `/admin` and **no
+family's tree**. The keeper can issue a family a new passcode, close a family
+without deleting a single record of theirs, end a session, and answer appeals.
+The keeper cannot read anybody's records — there is no endpoint that would
+allow it, and a test asserts there is none, because "we don't" is only true
+until somebody adds one.
+
+The old deployment-wide `APP_PASSPHRASE` still opens the *home* family, so
+nobody was signed out by this change. New families use passcodes.
+
+### What is recorded
+
+Every sign-in, every refusal, every invitation made or taken up, every
+passcode issued, every family closed or reopened, every appeal, and every
+batch of edits — each with the time, the address it came from, the browser,
+and who the person said they were. The keeper reads it at `/admin → Activity`,
+filtered by family, kind, address or date.
+
+Two deliberate absences. It does **not** look up where an address is in the
+world: that would mean sending a family's IP to somebody else's service on
+every event. And it does **not** record what was typed — a wrong passcode is
+recorded as a wrong passcode, and what an edit changed is in the family's own
+change log, which the record points at rather than copies.
+
+The record is partitioned by month, so a deployment running for years still
+answers "what happened this week" by reading this week, and dropping old
+history is `mw_drop_audit_before(...)` — dropping whole tables rather than
+deleting rows. Nothing calls it: how long to keep a record of who signed in is
+a decision for whoever runs the deployment.
+
+### Appeals
+
+There are two ways to reach the keeper, and both exist for the same reason:
+the commonest thing that goes wrong is a family that cannot get in.
+
+From inside the app, a family raises one from the family panel, and it carries
+which family it is from. From **outside** the gate, at `/appeal`, anybody can —
+which is the one writable thing a stranger can reach on this deployment, so it
+is rate-limited far harder than the door is, and it writes to a table nothing
+else reads.
+
+The appeal kinds are *lost passcode*, *cannot get in*, *somebody has been taken
+out of our tree*, and *something else*. The third is this project's older
+promise finally given somewhere to go: nothing in a tree is deleted, it is set
+aside with a reason and the person who recorded it is told — and being told is
+not the same as being heard.

@@ -73,7 +73,7 @@ const cookieFrom = res => {
   section('nothing is reachable without the passphrase');
   let r = await req(guarded, { path: '/' });
   eq('the tree is not served', r.status, 401);
-  check('a passphrase form is served instead', /Passphrase/.test(r.text));
+  check('a passcode form is served instead', /Family passcode/.test(r.text));
   check('and the tree itself is not in it', !/the tree<\/h1>/.test(r.text));
 
   r = await req(guarded, { path: '/api/tree/x/tree' });
@@ -172,7 +172,10 @@ const cookieFrom = res => {
   // The same card is served to everyone, before anyone has proved they belong
   // here. A preview naming a family would be one rendered on somebody else's
   // servers and shown in a group chat.
-  check('no family name', !/family:|treeId|tree_id/.test(crawl.text));
+  // Scoped to the tags themselves. The page's own stylesheet contains
+  // "font-family:", which is not a family and never was what this was about.
+  const metas = (crawl.text.match(/<meta[^>]*>/g) || []).join(' ');
+  check('no family name', !/family:|treeId|tree_id/.test(metas));
   check('and no names at all beyond the project’s own',
         (crawl.text.match(/content="[^"]*"/g) || [])
           .every(m => !/\b(Moyo|Ncube|Sekuru|Mbuya)\b/.test(m)));
