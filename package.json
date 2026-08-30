@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "node test/run.js",
-    "migrate": "node scripts/migrate-cli.js"
+    "migrate": "node scripts/migrate-cli.js",
+    "test:external": "node test/external.js",
+    "seed": "node scripts/seed.js"
   },
   "engines": {
     "node": ">=18.0.0"

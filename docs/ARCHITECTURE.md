@@ -157,3 +157,37 @@ scrambled who is the eldest would pass a count check and fail this one.
 
 One caveat: the older shape's single `spouseId` cannot represent remarriage, so
 a legacy tree converts forward cleanly but does not round-trip back.
+
+### After migrating: retiring the blob API
+
+Once a tree is in the tables, the old `/api/shared/:key` blob API becomes a
+hazard rather than merely redundant. The old UI would keep writing the whole
+tree into `kv_store` while the real data lives in the tables, and the two would
+diverge silently with nobody being told which is right.
+
+The server detects this and warns loudly at boot. It does **not** switch itself
+off, because that is a deployment decision:
+
+```bash
+MW_BLOB_API=off      # blob endpoints return 410 with an explanation
+```
+
+Turn it off at the point the frontend speaks `/api/tree/:id/ops`. Until then,
+leave it on — the deployed frontend still needs it.
+
+## Tests
+
+```bash
+TEST_DATABASE_URL=postgres://... npm test           # 165 tests, six suites
+node test/external.js                               # the out-of-repo harnesses
+```
+
+Each suite runs in its own freshly created database.
+
+`test/external.js` runs `kin.js`, `dupes.js`, `buds.js`, `drive2.js` and
+`test_gate.sh` — which are **not in this repository**, because they test the
+baobab frontend and the passphrase gate, neither of which is committed. It
+looks in `$MW_HARNESS_DIR`, then `./harness/`, then `/tmp`, boots a server,
+passes the base URL and a Chromium path, and reports absent suites as
+**SKIPPED rather than passed**. A suite that reported nothing when its file was
+missing would turn an untested build green, which is worse than no suite.

@@ -1,0 +1,53 @@
+name: tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: muti
+          POSTGRES_PASSWORD: muti
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        # The suites create a fresh database per file, so the server has to be
+        # genuinely accepting connections before the first one runs.
+        options: >-
+          --health-cmd "pg_isready -U muti"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run the test suites
+        env:
+          # No SSL against a local service container.
+          TEST_DATABASE_URL: postgres://muti:muti@127.0.0.1:5432/postgres
+          PGSSLMODE: disable
+        run: npm test
+
+      - name: Run the external harnesses if they are present
+        env:
+          DATABASE_URL: postgres://muti:muti@127.0.0.1:5432/postgres
+          PGSSLMODE: disable
+        # These live outside the repository (they test the baobab frontend and
+        # the passphrase gate, neither of which is committed). The runner
+        # reports them as SKIPPED rather than passed when absent, so this step
+        # is honest either way — it does not turn an untested build green.
+        run: node test/external.js

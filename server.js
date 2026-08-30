@@ -22,6 +22,16 @@ app.use(express.json({ limit: '2mb' }));
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
+// The old whole-tree blob API (/api/shared/:key). Still on by default, because
+// the deployed frontend is still the one that speaks it.
+//
+// Once the tree has been migrated into the relational tables, leaving this on
+// is a genuine hazard: the old UI would keep writing the whole tree into
+// kv_store while the real data lives in the tables, and the two would diverge
+// silently with nobody being told. Turn it off with MW_BLOB_API=off at the
+// point the frontend has been switched over.
+const BLOB_API = (process.env.MW_BLOB_API || 'on').toLowerCase() !== 'off';
+
 let db; // { get(key), set(key,value), del(key), list(prefix) }
 
 async function setupDatabase() {
@@ -47,6 +57,7 @@ async function setupDatabase() {
     `);
 
     console.log('Connected to Postgres — shared family-tree data will persist.');
+    await warnIfBlobApiIsNowDangerous(pool);
 
     db = {
       async get(key) {
@@ -89,7 +100,47 @@ async function setupDatabase() {
   }
 }
 
+// Once a tree has been migrated, the blob and the tables are two copies of the
+// same family, and only one of them is being kept up to date. Say so loudly at
+// boot rather than letting them drift apart quietly.
+async function warnIfBlobApiIsNowDangerous(pool) {
+  let migrated = false;
+  try {
+    const { rowCount } = await pool.query(
+      `SELECT 1 FROM changes WHERE op = 'migrateFromBlob' LIMIT 1`);
+    migrated = rowCount > 0;
+  } catch { return; }          // pre-migration schema; nothing to warn about
+  if (!migrated) return;
+
+  if (BLOB_API) {
+    console.warn(
+      '\n  ---------------------------------------------------------------\n' +
+      '  WARNING: this tree has been migrated into the relational tables,\n' +
+      '  but the old whole-tree blob API (/api/shared/:key) is still on.\n' +
+      '\n' +
+      '  Anything still writing through it — the old UI — will write to\n' +
+      '  kv_store, NOT to the tables, and the two copies will diverge with\n' +
+      '  nobody being told which one is right.\n' +
+      '\n' +
+      '  Set MW_BLOB_API=off once the frontend speaks /api/tree/:id/ops.\n' +
+      '  ---------------------------------------------------------------\n');
+  } else {
+    console.log('Blob API is off (MW_BLOB_API=off) — the tables are the only copy.');
+  }
+}
+
 // ---- API ----
+
+// Refuses rather than 404s when switched off, so a client still calling it
+// gets an explanation instead of looking like a routing mistake.
+app.use('/api/shared', (req, res, next) => {
+  if (BLOB_API) return next();
+  res.status(410).json({
+    error: 'blob_api_retired',
+    message: 'The whole-tree blob API has been retired on this deployment. ' +
+             'Use /api/tree/:id/ops, /bootstrap, /changes and /search.'
+  });
+});
 
 app.get('/api/shared/:key', async (req, res) => {
   try {
