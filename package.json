@@ -4,7 +4,9 @@
   "description": "A collaborative Shona family tree with kinship-term logic, built for deployment on Railway.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node test/run.js",
+    "migrate": "node scripts/migrate-cli.js"
   },
   "engines": {
     "node": ">=18.0.0"

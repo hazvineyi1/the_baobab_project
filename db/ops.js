@@ -1,0 +1,541 @@
+// The operations API.
+//
+// Replaces "PUT the whole tree as one JSON string". A client sends a list of
+// small, named operations; they are applied in ONE transaction, all or
+// nothing, and each appends a row to the changes log so other clients can sync
+// incrementally instead of re-fetching everything.
+//
+// Why this rather than field PUTs: two relatives editing the tree at the same
+// time must both keep their work. With a blob, the second save silently erased
+// the first. With ops, two people working on different branches never touch
+// the same rows, and two people editing the SAME person is detected and
+// reported rather than resolved by whoever happened to save last.
+
+const { ConflictError, badRequest, notFound, cycle } = require('./errors');
+const graph = require('./graph');
+
+// Namespace for this app's advisory locks, so a tree lock can never collide
+// with the migration lock in db/migrate.js.
+const TREE_LOCK_NS = 0x6d75;
+
+// ---------------------------------------------------------------------------
+// Version checks
+//
+// Every op that changes an existing entity may carry `expect`: the updated_at
+// the client composed its edit against. If the row has moved on since, we
+// refuse and hand back the current state so the client can merge.
+//
+// `expect` is optional. Omitting it is a deliberate "last write wins" for
+// callers that genuinely do not care (the migration script, seeding). The
+// client always sends it.
+
+async function checkVersion(client, table, id, expect, label) {
+  const { rows } = await client.query(
+    `SELECT * FROM ${table} WHERE id = $1`, [id]);
+  if (!rows.length) throw notFound(`${label} ${id} does not exist`);
+  const row = rows[0];
+  if (expect == null) return row;
+
+  const actual = new Date(row.updated_at).toISOString();
+  const wanted = new Date(expect).toISOString();
+  if (actual !== wanted) {
+    throw new ConflictError(
+      `${label} ${id} changed since you loaded it`,
+      { ...row, updated_at: actual }
+    );
+  }
+  return row;
+}
+
+// Union-level edits (partners, children, order) live in side tables, so
+// touching them has to bump the union's own updated_at by hand for the version
+// check above to mean anything.
+const touchUnion = (client, unionId) =>
+  client.query('UPDATE unions SET updated_at = clock_timestamp() WHERE id = $1', [unionId]);
+
+const touchPerson = (client, personId) =>
+  client.query('UPDATE people SET updated_at = clock_timestamp() WHERE id = $1', [personId]);
+
+async function logChange(client, treeId, entity, entityId, op, payload, by) {
+  await client.query(
+    `INSERT INTO changes (tree_id, entity, entity_id, op, payload, by)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [treeId, entity, entityId, op, JSON.stringify(payload ?? {}), by || '']
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The cycle guard.
+//
+// The frontend's canLink() refuses four things: making somebody their own
+// ancestor, their own descendant, giving them a second set of parents, or
+// re-recording someone who is already a parent. Those are data-integrity
+// rules, not UI niceties, so they are enforced here. The client keeps its own
+// copy purely as a fast path that avoids a round trip.
+//
+// This is only sound because the whole batch holds the tree's advisory lock:
+// without it, two concurrent addChild calls could each independently verify
+// "no cycle" and together create one.
+
+async function guardAddChild(client, unionId, personId) {
+  const partners = await graph.partnersOf(client, unionId);
+
+  if (partners.includes(personId)) {
+    throw cycle('A person cannot be a child of a union they are a partner in');
+  }
+
+  // Adding P as a child of U makes U's partners P's parents. That is a cycle
+  // if any of those partners is P's own descendant.
+  const below = await graph.descendantsOf(client, personId);
+  const offender = partners.find(p => below.has(p));
+  if (offender) {
+    throw cycle(
+      'That would make someone their own ancestor',
+      { personId, wouldBeParent: offender }
+    );
+  }
+
+  // At most one set of parents. The primary key on union_children.person_id
+  // enforces this absolutely; checking first only buys a clearer message.
+  const existing = await graph.parentUnionOf(client, personId);
+  if (existing && existing !== unionId) {
+    throw cycle(
+      'That person already has a recorded set of parents',
+      { personId, parentUnionId: existing }
+    );
+  }
+}
+
+async function guardAddPartner(client, unionId, personId) {
+  const children = await graph.childrenOf(client, unionId);
+
+  if (children.includes(personId)) {
+    throw cycle('A person cannot be a partner in the union they are a child of');
+  }
+
+  // Adding P as a partner of U makes P a parent of U's children. That is a
+  // cycle if any of those children is already P's ancestor.
+  const above = await graph.ancestorsOf(client, personId);
+  const offender = children.find(c => above.has(c));
+  if (offender) {
+    throw cycle(
+      'That would make someone their own descendant',
+      { personId, wouldBeChild: offender }
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Local references.
+//
+// A batch routinely creates a person and immediately links them ("add my
+// grandmother, then record her as my father's mother"). IDs are minted by the
+// database, so the client names new rows with a local ref — "$1" — and refers
+// to it later in the same batch. The response returns the ref -> id map.
+//
+// The client does NOT mint ids itself, and that is deliberate: two relatives
+// editing at once would both mint "p47". Client-side sequential ids collide
+// under exactly the concurrency this rewrite exists to fix.
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function makeResolver(refs) {
+  return function resolve(value, what) {
+    if (value == null) return null;
+    if (typeof value === 'string' && value.startsWith('$')) {
+      if (!refs.has(value)) {
+        throw badRequest(`${what}: unknown local reference ${value}`);
+      }
+      return refs.get(value);
+    }
+    // Check the shape here rather than letting Postgres reject it. A bad id is
+    // a caller mistake (400), and left to the driver it surfaces as an opaque
+    // 22P02 that reads like a server fault.
+    if (typeof value !== 'string' || !UUID_RE.test(value)) {
+      throw badRequest(`${what}: expected an id or a local reference, got ${JSON.stringify(value)}`);
+    }
+    return value;
+  };
+}
+
+// ---------------------------------------------------------------------------
+
+const PERSON_FIELDS = ['name', 'sex', 'totem', 'born', 'died', 'added_by'];
+
+const HANDLERS = {
+  async addPerson(ctx, op) {
+    const { client, treeId, actor } = ctx;
+    const { rows } = await client.query(
+      `INSERT INTO people (tree_id, name, sex, totem, born, died, added_by, legacy_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [treeId, op.name ?? '', op.sex ?? '', op.totem ?? '', op.born ?? '',
+       op.died ?? '', op.addedBy ?? actor ?? '', op.legacyId ?? null]
+    );
+    const person = rows[0];
+    if (op.ref) ctx.refs.set(op.ref, person.id);
+    await logChange(client, treeId, 'person', person.id, 'addPerson', op, actor);
+    return { ref: op.ref, id: person.id };
+  },
+
+  async updatePerson(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const id = resolve(op.id, 'updatePerson.id');
+    await checkVersion(client, 'people', id, op.expect, 'person');
+
+    const sets = [], vals = [];
+    for (const f of PERSON_FIELDS) {
+      const key = f === 'added_by' ? 'addedBy' : f;
+      if (op[key] !== undefined) { vals.push(op[key]); sets.push(`${f} = $${vals.length}`); }
+    }
+    if (!sets.length) return { id };
+    vals.push(id);
+    await client.query(
+      `UPDATE people SET ${sets.join(', ')} WHERE id = $${vals.length}`, vals);
+    await logChange(client, treeId, 'person', id, 'updatePerson', op, actor);
+    return { id };
+  },
+
+  async addUnion(ctx, op) {
+    const { client, treeId, actor } = ctx;
+    const { rows } = await client.query(
+      'INSERT INTO unions (tree_id, legacy_id) VALUES ($1, $2) RETURNING *',
+      [treeId, op.legacyId ?? null]);
+    const union = rows[0];
+    if (op.ref) ctx.refs.set(op.ref, union.id);
+    await logChange(client, treeId, 'union', union.id, 'addUnion', op, actor);
+    return { ref: op.ref, id: union.id };
+  },
+
+  async addPartner(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const unionId = resolve(op.unionId, 'addPartner.unionId');
+    const personId = resolve(op.personId, 'addPartner.personId');
+    await checkVersion(client, 'unions', unionId, op.expect, 'union');
+
+    const existing = await graph.partnersOf(client, unionId);
+    if (existing.includes(personId)) return { unionId, personId, already: true };
+
+    await guardAddPartner(client, unionId, personId);
+
+    // A union normally has two partners, sometimes one (a parent whose spouse
+    // is unknown), occasionally none. Nothing requires two.
+    const position = op.position ?? existing.length;
+    await client.query(
+      `INSERT INTO union_partners (union_id, person_id, position) VALUES ($1, $2, $3)`,
+      [unionId, personId, position]);
+    await touchUnion(client, unionId);
+    await logChange(client, treeId, 'union', unionId, 'addPartner', op, actor);
+    return { unionId, personId };
+  },
+
+  async removePartner(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const unionId = resolve(op.unionId, 'removePartner.unionId');
+    const personId = resolve(op.personId, 'removePartner.personId');
+    await checkVersion(client, 'unions', unionId, op.expect, 'union');
+    await client.query(
+      'DELETE FROM union_partners WHERE union_id = $1 AND person_id = $2',
+      [unionId, personId]);
+    await touchUnion(client, unionId);
+    await logChange(client, treeId, 'union', unionId, 'removePartner', op, actor);
+    return { unionId, personId };
+  },
+
+  async addChild(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const unionId = resolve(op.unionId, 'addChild.unionId');
+    const personId = resolve(op.personId, 'addChild.personId');
+    await checkVersion(client, 'unions', unionId, op.expect, 'union');
+
+    const existing = await graph.childrenOf(client, unionId);
+    if (existing.includes(personId)) return { unionId, personId, already: true };
+
+    await guardAddChild(client, unionId, personId);
+
+    // Appended last unless placed explicitly. union_children is eldest-first,
+    // and that order is real information — it decides the seniority terms
+    // (Mukoma / Munin'ina) when birth years are missing.
+    const birthOrder = op.birthOrder ?? existing.length;
+    if (op.birthOrder != null) {
+      // Make room. The unique constraint is deferred, so the shifted rows may
+      // transiently collide within this statement without tripping.
+      await client.query(
+        `UPDATE union_children SET birth_order = birth_order + 1
+          WHERE union_id = $1 AND birth_order >= $2`, [unionId, birthOrder]);
+    }
+    await client.query(
+      `INSERT INTO union_children (union_id, person_id, birth_order) VALUES ($1, $2, $3)`,
+      [unionId, personId, birthOrder]);
+    await touchUnion(client, unionId);
+    await touchPerson(client, personId);
+    await logChange(client, treeId, 'union', unionId, 'addChild', op, actor);
+    return { unionId, personId, birthOrder };
+  },
+
+  async removeChild(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const unionId = resolve(op.unionId, 'removeChild.unionId');
+    const personId = resolve(op.personId, 'removeChild.personId');
+    await checkVersion(client, 'unions', unionId, op.expect, 'union');
+    await client.query(
+      'DELETE FROM union_children WHERE union_id = $1 AND person_id = $2',
+      [unionId, personId]);
+    await touchUnion(client, unionId);
+    await logChange(client, treeId, 'union', unionId, 'removeChild', op, actor);
+    return { unionId, personId };
+  },
+
+  async reorderChildren(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const unionId = resolve(op.unionId, 'reorderChildren.unionId');
+    await checkVersion(client, 'unions', unionId, op.expect, 'union');
+
+    const ordered = (op.orderedIds || []).map(id => resolve(id, 'reorderChildren.orderedIds'));
+    const current = await graph.childrenOf(client, unionId);
+
+    // Must be a permutation of exactly the current children. Anything else is
+    // a stale client working from a list that has since gained or lost a
+    // sibling, and silently applying it would drop somebody's birth order.
+    const same = ordered.length === current.length &&
+                 new Set(ordered).size === ordered.length &&
+                 current.every(id => ordered.includes(id));
+    if (!same) {
+      throw new ConflictError(
+        'The sibling list has changed since you loaded it',
+        { unionId, children: current }
+      );
+    }
+
+    for (let i = 0; i < ordered.length; i++) {
+      await client.query(
+        'UPDATE union_children SET birth_order = $1 WHERE person_id = $2', [i, ordered[i]]);
+    }
+    await touchUnion(client, unionId);
+    await logChange(client, treeId, 'union', unionId, 'reorderChildren', op, actor);
+    return { unionId, orderedIds: ordered };
+  },
+
+  async setRoot(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const personId = resolve(op.personId, 'setRoot.personId');
+    await checkVersion(client, 'people', personId, op.expect, 'person');
+    await client.query(
+      'UPDATE people SET is_root = false WHERE tree_id = $1 AND is_root', [treeId]);
+    await client.query('UPDATE people SET is_root = true WHERE id = $1', [personId]);
+    await logChange(client, treeId, 'person', personId, 'setRoot', op, actor);
+    return { personId };
+  },
+
+  async dismissDuplicate(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    let a = resolve(op.aId, 'dismissDuplicate.aId');
+    let b = resolve(op.bId, 'dismissDuplicate.bId');
+    if (a === b) throw badRequest('Cannot dismiss a person against themselves');
+    // Canonical order, matching the CHECK on the table. A dismissal recorded
+    // one way round must suppress the pair scanned the other way round.
+    if (a > b) [a, b] = [b, a];
+    await client.query(
+      `INSERT INTO not_duplicates (tree_id, a_id, b_id, by) VALUES ($1, $2, $3, $4)
+       ON CONFLICT DO NOTHING`, [treeId, a, b, actor || '']);
+    await logChange(client, treeId, 'person', a, 'dismissDuplicate', { aId: a, bId: b }, actor);
+    return { aId: a, bId: b };
+  },
+
+  async mergePeople(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const keepId = resolve(op.keepId, 'mergePeople.keepId');
+    const mergeId = resolve(op.mergeId, 'mergePeople.mergeId');
+    if (keepId === mergeId) throw badRequest('Cannot merge a person into themselves');
+
+    const keep = await checkVersion(client, 'people', keepId, op.expectKeep, 'person');
+    const merge = await checkVersion(client, 'people', mergeId, op.expectMerge, 'person');
+
+    // Merging two people who are each other's ancestor would build a cycle.
+    const below = await graph.descendantsOf(client, mergeId);
+    const above = await graph.ancestorsOf(client, mergeId);
+    if (below.has(keepId) || above.has(keepId)) {
+      throw cycle('Those two are recorded as ancestor and descendant of each other',
+                  { keepId, mergeId });
+    }
+
+    // Parent unions: if both have one and they differ, this is not a merge we
+    // can decide. Two different sets of parents is a genuine disagreement
+    // about who somebody is, and guessing would destroy one branch.
+    const keepParent = await graph.parentUnionOf(client, keepId);
+    const mergeParent = await graph.parentUnionOf(client, mergeId);
+    if (keepParent && mergeParent && keepParent !== mergeParent) {
+      throw cycle(
+        'Those two records have different parents — resolve that before merging',
+        { keepId, keepParentUnion: keepParent, mergeId, mergeParentUnion: mergeParent });
+    }
+    if (!keepParent && mergeParent) {
+      await client.query(
+        'UPDATE union_children SET person_id = $1 WHERE person_id = $2', [keepId, mergeId]);
+    } else if (mergeParent) {
+      await client.query('DELETE FROM union_children WHERE person_id = $1', [mergeId]);
+    }
+
+    // Partner memberships move across, except where that would duplicate one
+    // the kept person already holds.
+    await client.query(
+      `DELETE FROM union_partners WHERE person_id = $1
+        AND union_id IN (SELECT union_id FROM union_partners WHERE person_id = $2)`,
+      [mergeId, keepId]);
+    await client.query(
+      'UPDATE union_partners SET person_id = $1 WHERE person_id = $2', [keepId, mergeId]);
+
+    // Blank fields on the kept record are filled from the one being absorbed —
+    // the duplicate often carries the detail the survivor is missing.
+    const filled = {};
+    for (const f of ['name', 'sex', 'totem', 'born', 'died', 'added_by']) {
+      if (!keep[f] && merge[f]) filled[f] = merge[f];
+    }
+    if (Object.keys(filled).length) {
+      const sets = Object.keys(filled).map((f, i) => `${f} = $${i + 1}`);
+      await client.query(
+        `UPDATE people SET ${sets.join(', ')} WHERE id = $${sets.length + 1}`,
+        [...Object.values(filled), keepId]);
+    }
+    if (merge.is_root && !keep.is_root) {
+      await client.query('UPDATE people SET is_root = true WHERE id = $1', [keepId]);
+    }
+
+    // Dismissals naming the absorbed record now name the survivor. Re-canonicalise
+    // (a < b) and drop any that collapsed into self-pairs or existing rows.
+    const { rows: dismissals } = await client.query(
+      'SELECT a_id, b_id FROM not_duplicates WHERE tree_id = $1 AND (a_id = $2 OR b_id = $2)',
+      [treeId, mergeId]);
+    await client.query(
+      'DELETE FROM not_duplicates WHERE tree_id = $1 AND (a_id = $2 OR b_id = $2)',
+      [treeId, mergeId]);
+    for (const d of dismissals) {
+      let a = d.a_id === mergeId ? keepId : d.a_id;
+      let b = d.b_id === mergeId ? keepId : d.b_id;
+      if (a === b) continue;
+      if (a > b) [a, b] = [b, a];
+      await client.query(
+        `INSERT INTO not_duplicates (tree_id, a_id, b_id, by) VALUES ($1,$2,$3,$4)
+         ON CONFLICT DO NOTHING`, [treeId, a, b, actor || '']);
+    }
+
+    await client.query('DELETE FROM people WHERE id = $1', [mergeId]);
+
+    // Merging two records for one person can leave two unions with an
+    // identical partner set — the same marriage, recorded twice. Fold them
+    // together, moving children into the survivor. Children must move BEFORE
+    // the empty union is dropped: union_children.union_id is RESTRICT
+    // precisely so that a union with children can never vanish under them.
+    const collapsed = await collapseDuplicateUnions(client, treeId, keepId);
+
+    await touchPerson(client, keepId);
+    await logChange(client, treeId, 'person', keepId, 'mergePeople',
+                    { keepId, mergeId, filled, collapsedUnions: collapsed }, actor);
+    return { keepId, mergeId, filled, collapsedUnions: collapsed };
+  }
+};
+
+// Unions sharing an identical partner set are the same marriage recorded
+// twice. Only called after a merge, and only for unions touching the survivor.
+async function collapseDuplicateUnions(client, treeId, personId) {
+  const { rows } = await client.query(`
+    SELECT u.id,
+           COALESCE(array_agg(up.person_id ORDER BY up.person_id)
+                    FILTER (WHERE up.person_id IS NOT NULL), '{}') AS partners
+      FROM unions u
+      LEFT JOIN union_partners up ON up.union_id = u.id
+     WHERE u.tree_id = $1
+       AND u.id IN (SELECT union_id FROM union_partners WHERE person_id = $2)
+     GROUP BY u.id`, [treeId, personId]);
+
+  const byKey = new Map();
+  const collapsed = [];
+  for (const r of rows) {
+    // A union with no partners is not "the same marriage" as another with no
+    // partners — it is an unknown pair of parents. Never fold those together.
+    if (!r.partners.length) continue;
+    const key = r.partners.join('|');
+    if (!byKey.has(key)) { byKey.set(key, r.id); continue; }
+
+    const keepUnion = byKey.get(key);
+    const dropUnion = r.id;
+    const { rows: [{ n }] } = await client.query(
+      'SELECT count(*)::int AS n FROM union_children WHERE union_id = $1', [keepUnion]);
+    await client.query(
+      `UPDATE union_children SET union_id = $1,
+              birth_order = birth_order + $2 WHERE union_id = $3`,
+      [keepUnion, n, dropUnion]);
+    await client.query('DELETE FROM union_partners WHERE union_id = $1', [dropUnion]);
+    await client.query('DELETE FROM unions WHERE id = $1', [dropUnion]);
+    collapsed.push({ kept: keepUnion, dropped: dropUnion });
+  }
+  return collapsed;
+}
+
+// ---------------------------------------------------------------------------
+
+async function applyOps(pool, treeId, ops, actor = '') {
+  if (!Array.isArray(ops)) throw badRequest('ops must be an array');
+  if (!ops.length) throw badRequest('ops is empty');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Serialise all writes to this tree.
+    //
+    // This is doing three jobs at once, and it is worth being explicit because
+    // it looks like it is only doing the first:
+    //
+    //   1. It makes the cycle guard sound. Two concurrent addChild calls could
+    //      otherwise each verify "no cycle" independently and together create
+    //      one.
+    //   2. It makes changes.seq gapless FOR THIS TREE. A bare BIGSERIAL does
+    //      not give you that: sequence values can be handed out in one order
+    //      and committed in another, so a client polling ?since=N can
+    //      permanently miss a row that was assigned a lower seq but committed
+    //      later. That is silent data loss in the sync path.
+    //   3. It removes read-modify-write races inside a batch (making room in
+    //      birth_order, appending at the end of a partner list).
+    //
+    // At family-scale write volume — a handful of people editing a tree — the
+    // contention cost is nil. The lock is released when the transaction ends,
+    // whether it commits or rolls back.
+    await client.query('SELECT pg_advisory_xact_lock($1, hashtext($2))',
+                       [TREE_LOCK_NS, treeId]);
+
+    const { rowCount } = await client.query('SELECT 1 FROM trees WHERE id = $1', [treeId]);
+    if (!rowCount) throw notFound(`tree ${treeId} does not exist`);
+
+    const refs = new Map();
+    const ctx = { client, treeId, actor, refs, resolve: makeResolver(refs) };
+
+    const results = [];
+    for (const [i, op] of ops.entries()) {
+      const handler = HANDLERS[op?.op];
+      if (!handler) throw badRequest(`ops[${i}]: unknown operation ${JSON.stringify(op?.op)}`);
+      try {
+        results.push({ op: op.op, ...(await handler(ctx, op)) });
+      } catch (e) {
+        if (e.status) { e.details = { ...e.details, opIndex: i, op: op.op }; }
+        throw e;
+      }
+    }
+
+    const { rows } = await client.query(
+      'SELECT COALESCE(max(seq), 0)::bigint AS seq FROM changes WHERE tree_id = $1', [treeId]);
+
+    await client.query('COMMIT');
+    return {
+      seq: Number(rows[0].seq),
+      refs: Object.fromEntries(refs),
+      results
+    };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+module.exports = { applyOps, HANDLERS };

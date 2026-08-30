@@ -14,6 +14,7 @@ const express = require('express');
 const path = require('path');
 const { createPool } = require('./db/pool');
 const { migrate } = require('./db/migrate');
+const treeRoutes = require('./routes/tree');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -31,6 +32,11 @@ async function setupDatabase() {
     // key/value API below still runs on kv_store and is untouched by this —
     // the two coexist until the tree has actually been migrated across.
     await migrate(pool);
+
+    // The relational API. Only available with a real database — the in-memory
+    // fallback below exists so `npm start` works for a quick look, and it
+    // cannot support transactions, constraints or incremental sync.
+    app.use('/api', treeRoutes(pool));
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS kv_store (
