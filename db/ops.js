@@ -315,15 +315,21 @@ const HANDLERS = {
     return { unionId, orderedIds: ordered };
   },
 
+  /* Mark, or unmark, somebody as the furthest back this line has been traced.
+ 
+     A tree has as many of these as it has lines: one relative traces their
+     father's people to 1890 and stops, another traces their mother's to 1920
+     and stops, and both statements are true at once. This used to clear every
+     other root before setting one, which quietly erased one family's work
+     whenever another family recorded theirs. */
   async setRoot(ctx, op) {
     const { client, treeId, actor, resolve } = ctx;
-    const personId = resolve(op.personId, 'setRoot.personId');
+    const personId = resolve(op.personId ?? op.id, 'setRoot.personId');
     await checkVersion(client, 'people', personId, op.expect, 'person');
-    await client.query(
-      'UPDATE people SET is_root = false WHERE tree_id = $1 AND is_root', [treeId]);
-    await client.query('UPDATE people SET is_root = true WHERE id = $1', [personId]);
-    await logChange(client, treeId, 'person', personId, 'setRoot', op, actor);
-    return { personId };
+    const root = op.root === undefined ? true : !!op.root;
+    await client.query('UPDATE people SET is_root = $2 WHERE id = $1', [personId, root]);
+    await logChange(client, treeId, 'person', personId, 'setRoot', { personId, root }, actor);
+    return { personId, root };
   },
 
   async dismissDuplicate(ctx, op) {
@@ -392,11 +398,16 @@ const HANDLERS = {
     // what its author was told; overwriting it would edit their history.
     if (person.aside_at) return { id, alreadyAside: true };
 
+    // Where the details went, when this set-aside is a merge. Optional, and
+    // resolved like any other id so a merge inside one batch can name a
+    // person created in that same batch.
+    const into = op.mergedInto ? resolve(op.mergedInto, 'setAside.mergedInto') : null;
     await client.query(
-      `UPDATE people SET aside_at = clock_timestamp(), aside_by = $2, aside_why = $3
-        WHERE id = $1`, [id, actor || '', why]);
+      `UPDATE people SET aside_at = clock_timestamp(), aside_by = $2, aside_why = $3,
+                         merged_into = $4
+        WHERE id = $1`, [id, actor || '', why, into === id ? null : into]);
     await logChange(client, treeId, 'person', id, 'setAside',
-                    { id, why, addedBy: person.added_by }, actor);
+                    { id, why, mergedInto: into, addedBy: person.added_by }, actor);
     return { id, why, notify: person.added_by };
   },
 

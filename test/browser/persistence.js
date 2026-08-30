@@ -1,18 +1,20 @@
-// The shared tree must survive everything except a deliberate, announced act.
+// The tree must survive everything except a deliberate, announced act.
 //
-// Each check here reproduces a way the family's tree could be lost without
-// anybody pressing a delete button. They are written against a mock server
-// that can be told to misbehave, because the failures that erase data are
-// exactly the ones a healthy server never produces.
+// Each check reproduces a way the family's work could be lost without anybody
+// pressing a delete button. They run against the REAL server with failures
+// injected into the network, because the failures that lose data are exactly
+// the ones a healthy server never produces — and mocking the server instead
+// would test the mock.
 //
-// Not part of `npm test` — it needs Chromium and the mock server. Run:
+// Not part of `npm test` — needs Chromium and a live server. Run:
 //
-//   node test/browser/mock-server.js &
-//   NODE_PATH=$(npm root -g) node test/browser/persistence.js
+//   DATABASE_URL=... PORT=3940 node server.js &
+//   MW_BASE_URL=http://127.0.0.1:3940/ NODE_PATH=$(npm root -g) \
+//     node test/browser/persistence.js
 
 const { chromium } = require('playwright');
 
-const BASE = process.env.MW_BASE_URL || 'http://127.0.0.1:3931/';
+const BASE = process.env.MW_BASE_URL || 'http://127.0.0.1:3940/';
 const EXE  = process.env.MW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 
 let pass = 0, fail = 0;
@@ -21,150 +23,127 @@ const bad = (m, d) => { fail++; console.log('  FAIL ' + m + (d ? '  — ' + d : 
 const is  = (a, b, m) => a === b ? ok(m) : bad(m, `expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 const section = t => console.log('\n' + t);
 
-// A tree with four people in it, as the server would be holding it.
-const FAMILY = JSON.stringify({
-  people: {
-    p1:{ id:'p1', name:'Sekuru Chenjerai', sex:'m', born:'1920', root:true },
-    p2:{ id:'p2', name:'Baba Tendai',      sex:'m', born:'1950' },
-    p3:{ id:'p3', name:'Amai Rudo',        sex:'f', born:'1955' },
-    p4:{ id:'p4', name:'Farai',            sex:'m', born:'1980' }
-  },
-  unions: {
-    u1:{ id:'u1', partners:['p1'],      children:['p2'] },
-    u2:{ id:'u2', partners:['p2','p3'], children:['p4'] }
-  },
-  rootId:'p4', seq:9, notDuplicates:[], lexicon:{}
-});
-
-// This sandbox cannot reach fonts.googleapis.com, and waiting for it to time
-// out on every navigation is slower than the whole suite. Nothing under test
-// depends on the fonts loading.
-async function offline(ctx){
-  await ctx.route('**', route => {
-    const u = route.request().url();
-    if (u.startsWith('http://127.0.0.1:3931')) return route.continue();
-    return route.abort();
-  });
-}
-const go = (page, url) => page.goto(url, { waitUntil: 'domcontentloaded' });
-
-const ctl = (page, mode) => page.evaluate(
-  (m) => fetch('/__mode', { headers:{ 'x-mode': m } }).then(r => r.text()), mode);
-const serverBlob = page => page.evaluate(() => fetch('/__blob').then(r => r.json()));
-const seed = page => page.evaluate(
-  b => fetch('/__seed', { method:'POST', body:b }).then(r => r.text()), FAMILY);
-
 (async () => {
   const browser = await chromium.launch({ executablePath: EXE });
 
-  // Each check gets its own browser context, so one page's localStorage can
-  // never stand in for the shared copy in the next.
-  const fresh = async (mode) => {
+  // `broken` names which request to sabotage, and how.
+  const open = async (broken) => {
     const ctx = await browser.newContext({ viewport:{ width:1280, height:900 } });
-    await offline(ctx);
+    await ctx.route('**', route => {
+      const url = route.request().url();
+      if (!url.startsWith(BASE)) return route.abort();
+      const path = url.slice(BASE.length - 1);
+      if (broken && broken.match.test(path)) return broken.act(route);
+      return route.continue();
+    });
     const page = await ctx.newPage();
-    page.on('pageerror', e => bad('page error', e.message));
-    await go(page, BASE);
-    await seed(page);
-    await ctl(page, mode || 'ok');
-    await go(page, BASE);
-    await page.waitForFunction(() => typeof store === 'string');
+    await page.goto(BASE, { waitUntil:'domcontentloaded' });
+    await page.waitForFunction(() => typeof store === 'string', null, { timeout: 20000 });
     return { ctx, page };
   };
 
-  // ── the tree is there when you arrive ─────────────────────────────────
-  section('a second person opening the page sees the first person’s work');
-  {
-    const { ctx, page } = await fresh('ok');
-    is(await page.evaluate(() => store), 'shared', 'the page knows it is on the shared tree');
-    is(await page.evaluate(() => people().length), 4, 'all four relatives loaded');
-    is(await page.evaluate(() => state.people.p1.root), true, 'the root flag came with them');
+  const serverNames = async (page) => page.evaluate(async (base) => {
+    const h = await fetch('/api/home').then(r => r.json());
+    const d = await fetch(`/api/tree/${h.treeId}/tree`).then(r => r.json());
+    return d.people.map(p => p.name).sort();
+  }, BASE);
 
-    // Add somebody, as the second person would.
-    await page.evaluate(() => { grow('child', 'p4', 'Ruvarashe', 'f', '', { born:'2005' }); save(); });
-    await page.waitForTimeout(700);
-    const after = await serverBlob(page);
-    is(JSON.parse(after.blob).people ? Object.keys(JSON.parse(after.blob).people).length : 0, 5,
-       'the addition reached the server');
+  // ── the tree is there, and it persists ────────────────────────────────
+  section('what one person records, the next person finds');
+  {
+    const { ctx, page } = await open(null);
+    is(await page.evaluate(() => store), 'shared', 'the page is on the shared tree');
+    const before = (await page.evaluate(() => people().length));
+    await page.evaluate(() => { addPerson('Mbuya Nyarai', 'f', 'Moyo', '1930', ''); save(); });
+    await page.waitForTimeout(1500);
+    is((await page.evaluate(() => people().length)), before + 1, 'the addition is on screen');
+    is((await serverNames(page)).includes('Mbuya Nyarai'), true, 'and reached the database');
     await ctx.close();
+
+    // A brand-new browser: no localStorage, nothing carried over. This is what
+    // "someone logs out and someone else logs in" actually looks like.
+    const two = await open(null);
+    is((await two.page.evaluate(() => people().map(p => p.name)))
+        .includes('Mbuya Nyarai'), true, 'a fresh browser sees it');
+    is(await two.page.evaluate(() => localStorage.getItem('muti-baobab-v1')), null,
+       'and kept nothing locally — the database is the copy');
+    await two.ctx.close();
   }
 
-  section('and it is still there after that browser is gone');
+  // ── the ways it could be lost ─────────────────────────────────────────
+  section('a tree that will not parse is never written over');
   {
-    // A brand-new context: no localStorage, nothing carried over. This is
-    // what "someone logs out and someone else logs in" actually looks like.
-    const ctx = await browser.newContext();
-    await offline(ctx);
-    const page = await ctx.newPage();
-    await go(page, BASE);
-    await page.waitForFunction(() => typeof store === 'string');
-    is(await page.evaluate(() => people().length), 5, 'the next person sees five, not zero');
-    is(await page.evaluate(() => localStorage.getItem('muti-baobab-v1')), null,
-       'nothing was kept in this browser — the server is the copy');
-    await ctx.close();
-  }
-
-  // ── the ways it used to be erased ─────────────────────────────────────
-  section('a shared tree that will not parse is never overwritten');
-  {
-    const { ctx, page } = await fresh('corrupt');
+    const { ctx, page } = await open({
+      match: /\/api\/tree\/[^/]+\/tree/,
+      act: route => route.fulfill({ status:200, contentType:'application/json',
+                                    body:'{ truncated half way' })
+    });
     is(await page.evaluate(() => store), 'stalled', 'the page refuses to call itself connected');
     is(await page.isVisible('#stalled'), true, 'and says so on screen');
-    const before = (await serverBlob(page)).writes;
-    await page.evaluate(() => { grow('child', 'p4', 'Ghost', 'm', '', {}); save(); });
-    await page.waitForTimeout(700);
-    is((await serverBlob(page)).writes, before, 'no write was attempted');
-    is(JSON.parse((await serverBlob(page)).blob).people.p1.name, 'Sekuru Chenjerai',
-       'the family on the server is untouched');
+    await page.evaluate(() => { addPerson('Ghost', 'm', '', '', ''); save(); });
+    await page.waitForTimeout(1200);
     await ctx.close();
+
+    const check = await open(null);
+    is((await check.page.evaluate(() => people().map(p => p.name))).includes('Ghost'), false,
+       'nothing was written');
+    is((await check.page.evaluate(() => people().map(p => p.name))).includes('Mbuya Nyarai'), true,
+       'and the family on the server is untouched');
+    await check.ctx.close();
   }
 
-  section('a server error is not treated as an empty tree');
+  section('a server error is not mistaken for an empty tree');
   {
-    const { ctx, page } = await fresh('error5');
+    const { ctx, page } = await open({
+      match: /\/api\/tree\/[^/]+\/tree/,
+      act: route => route.fulfill({ status:500, body:'boom' })
+    });
     is(await page.evaluate(() => store), 'stalled', 'a 500 stalls the page');
-    is(/answered 500/.test(await page.textContent('#stalled')), true, 'and the reason is shown');
-    await page.evaluate(() => { grow('child', 'p4', 'Ghost', 'm', '', {}); save(); });
-    await page.waitForTimeout(700);
-    is((await serverBlob(page)).writes, 0, 'still no write');
+    is(await page.evaluate(() => people().length), 0, 'it holds no tree');
+    is(/could not be read/.test(await page.textContent('#stalled')), true, 'and says why');
     await ctx.close();
   }
 
-  section('a retired endpoint stalls rather than silently going local');
+  section('a connection that drops does not fork the tree into this browser');
   {
-    const { ctx, page } = await fresh('gone410');
-    is(await page.evaluate(() => store), 'stalled', 'a 410 stalls the page');
-    is(/retired/.test(await page.textContent('#stalled')), true, 'and explains itself');
+    const { ctx, page } = await open({
+      match: /\/api\/home/, act: route => route.abort()
+    });
+    is(await page.evaluate(() => store), 'stalled', 'no answer at all stalls the page');
+    is(await page.evaluate(() => localStorage.getItem('muti-baobab-v1')), null,
+       'and nothing was quietly kept here instead');
     await ctx.close();
   }
 
-  section('a failed write stops, rather than forking into this browser');
+  section('a failed write stops, rather than looking like a save');
   {
-    const { ctx, page } = await fresh('ok');
-    is(await page.evaluate(() => store), 'shared', 'starts connected');
-    await ctl(page, 'writefail');
-    await page.evaluate(() => { grow('child', 'p4', 'Tapiwa', 'm', '', {}); save(); });
-    await page.waitForTimeout(900);
+    const { ctx, page } = await open({
+      match: /\/ops$/, act: route => route.fulfill({ status:500, body:'nope' })
+    });
+    is(await page.evaluate(() => store), 'shared', 'it starts connected');
+    await page.evaluate(() => { addPerson('Unsaved', 'm', '', '', ''); save(); });
+    await page.waitForTimeout(1500);
     is(await page.evaluate(() => store), 'stalled', 'the page notices the write failed');
     is(await page.isVisible('#stalled'), true, 'and says so');
     is(await page.evaluate(() => localStorage.getItem('muti-baobab-v1')), null,
        'the tree was NOT quietly copied into this browser instead');
     await ctx.close();
+
+    const check = await open(null);
+    is((await check.page.evaluate(() => people().map(p => p.name))).includes('Unsaved'), false,
+       'and the failed addition did not reach the database');
+    await check.ctx.close();
   }
 
   section('no API on this origin is genuinely local, and still works');
   {
-    const ctx = await browser.newContext();
-    await offline(ctx);
-    const page = await ctx.newPage();
-    await go(page, BASE);
-    await ctl(page, 'notfound');
-    await go(page, BASE);
-    await page.waitForFunction(() => typeof store === 'string');
+    const { ctx, page } = await open({
+      match: /\/api\/home/, act: route => route.fulfill({ status:404, body:'nf' })
+    });
     is(await page.evaluate(() => store), 'local', 'a 404 means no server here');
     is(await page.isVisible('#stalled'), false, 'nothing is wrong, so nothing is said');
     await page.evaluate(() => { addPerson('Solo', 'm', '', '', ''); save(); });
-    await page.waitForTimeout(700);
+    await page.waitForTimeout(1200);
     is(await page.evaluate(() => !!localStorage.getItem('muti-baobab-v1')), true,
        'and it keeps the tree in this browser');
     await ctx.close();

@@ -279,6 +279,76 @@ async function trigramAvailable(pool) {
   return trgmCache;
 }
 
+/* The whole tree, in the shape the page holds it.
+ 
+   bootstrap() sends a neighbourhood, which is the right answer for a tree with
+   thousands of people in it and a reader who is looking at one corner. This
+   sends everything, and exists because the page is an EDITOR: it derives
+   kinship terms, generation numbers, duplicate candidates and the layout from
+   the whole graph, and a partial graph gives quietly wrong answers rather than
+   missing ones — a cousin who looks like a stranger because the linking
+   ancestor was outside the neighbourhood.
+ 
+   The seq is the point of it as much as the rows are. It is the position in
+   the change log that this snapshot was taken at, so a client can ask "has
+   anything happened since?" with one cheap query instead of re-reading. */
+async function fullTree(pool, treeId) {
+  const { rowCount } = await pool.query('SELECT 1 FROM trees WHERE id = $1', [treeId]);
+  if (!rowCount) throw notFound(`tree ${treeId} does not exist`);
+
+  // The seq is read FIRST, before the rows. A change committing between the
+  // two would then be re-delivered by the next poll rather than missed — the
+  // safe direction to be wrong in.
+  const seq = await headSeq(pool, treeId);
+
+  // Set-aside people ARE sent, with their state. They are not part of the
+  // visible tree, but the page is where they are read and put back, and a
+  // record you cannot see is a record you cannot recover. The page hides them
+  // through its own single seam, the same way this module does with PRESENT.
+  const [peopleR, unionsR, ndR, termsR, rootR] = await Promise.all([
+    pool.query(`SELECT ${PERSON_COLS} FROM people
+                 WHERE tree_id = $1 ORDER BY created_at`, [treeId]),
+    pool.query(`
+      SELECT u.id, u.updated_at,
+             COALESCE((SELECT array_agg(up.person_id ORDER BY up.position)
+                         FROM union_partners up WHERE up.union_id = u.id), '{}') AS partners,
+             COALESCE((SELECT array_agg(uc.person_id ORDER BY uc.birth_order)
+                         FROM union_children uc WHERE uc.union_id = u.id), '{}') AS children
+        FROM unions u WHERE u.tree_id = $1 ORDER BY u.created_at`, [treeId]),
+    pool.query('SELECT a_id, b_id FROM not_duplicates WHERE tree_id = $1', [treeId]),
+    pool.query('SELECT shape, term, note, by, at FROM kin_terms WHERE tree_id = $1', [treeId]),
+    pool.query(`SELECT id FROM people
+                 WHERE tree_id = $1 AND is_root AND ${PRESENT}
+                 ORDER BY created_at LIMIT 1`, [treeId])
+  ]);
+
+  // Union lists are sent whole. A set-aside person has not left their marriage
+  // or stopped being their children's parent — filtering them out here would
+  // destroy that link on the way to the page, and putting them back would not
+  // put it back.
+  const unions = unionsR.rows.map(u => ({
+    id: u.id,
+    updated_at: u.updated_at,
+    partners: u.partners.slice(),
+    children: u.children.slice()
+  }));
+
+  const lexicon = {};
+  for (const t of termsR.rows) {
+    lexicon[t.shape] = { term: t.term, note: t.note, by: t.by, at: t.at };
+  }
+
+  return {
+    treeId, seq,
+    people: peopleR.rows,
+    unions,
+    notDuplicates: ndR.rows.map(r => [r.a_id, r.b_id]),
+    lexicon,
+    rootId: rootR.rows.length ? rootR.rows[0].id : null,
+    total: peopleR.rows.filter(p => !p.aside_at).length
+  };
+}
+
 /* Who has been set aside, and — when `recordedBy` is given — which of them
    were entered by that person.
 
@@ -316,5 +386,5 @@ async function setAsideList(pool, treeId, { recordedBy } = {}) {
   };
 }
 
-module.exports = { bootstrap, changesSince, search, headSeq, familyContext,
-                   trigramAvailable, setAsideList };
+module.exports = { bootstrap, fullTree, changesSince, search, headSeq,
+                   familyContext, trigramAvailable, setAsideList };

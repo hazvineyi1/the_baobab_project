@@ -468,6 +468,20 @@ body{
 #seed .box .btn{width:100%;}
 
 /* ── chrome ─────────────────────────────────────────────────────────── */
+/* Somebody else changed the tree while you were looking at it. Quiet and
+   temporary — a tree that changes shape with no explanation reads as a bug,
+   but this is the system working. */
+#others{
+  position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:78;
+  max-width:min(520px, calc(100vw - 28px));
+  padding:9px 15px; border-radius:999px;
+  background:var(--pod); border:1.5px solid var(--pod-edge);
+  box-shadow:var(--shadow);
+  font-family:'Karla',sans-serif; font-size:12px; line-height:1.5;
+  color:var(--muted);
+  animation:bud .25s ease-out backwards;
+}
+
 /* Shown only when the shared tree could not be read. It has to be
    unmissable: everything below it is a browser that must not write. */
 #stalled{
@@ -600,6 +614,8 @@ body{
 </div>
 
 <p id="hint" hidden>Tap anyone to see where the tree can grow.<br><b>Roots</b> run down into the soil, <b>branches</b> reach up.</p>
+<div id="others" hidden role="status"></div>
+
 <div id="stalled" hidden role="alert">
   <b>The shared tree did not load.</b>
   <span id="stalledWhy"></span>
@@ -3751,44 +3767,70 @@ function plant(){
 addEventListener('resize', applyTransform);
 addEventListener('keydown', e => { if (e.key === 'Escape' && !pending && sel){ sel = null; render(); } });
 
-/* ── storage ────────────────────────────────────────────────────────────
-   On the deployed site this talks to the shared /api/shared endpoint so the
-   whole family sees one tree. Anywhere else it quietly keeps the tree in
-   this browser instead.
+/* ── storage and sync ───────────────────────────────────────────────────
+   The tree lives in Postgres and several relatives edit it at once.
 
-   THREE STATES, NOT TWO. The middle one used to be missing, and its absence
-   was a way to erase the family's tree without anybody touching a delete
-   button:
+   WHAT WENT BEFORE, AND WHY IT HAD TO CHANGE. This page used to send the
+   WHOLE tree on every save. Two people editing at the same time meant the
+   second save replaced the first's work with a copy of the tree that predated
+   it — silently, with nobody told and nothing to recover. That is the failure
+   this file now exists to make impossible.
+
+   Writes are OPS, not a copy of the tree. "Add this person", "put this child
+   third", "correct this birth year" — each one is a change the server applies
+   to whatever the tree currently is, so two people adding different relatives
+   both land, in either order, with nothing overwritten.
+
+   HOW THE OPS ARE FOUND. Not by rewriting the twenty-odd places that edit the
+   tree — every one of them would be a chance to forget. `synced` holds a copy
+   of the tree as the server last confirmed it; diffOps() compares that with
+   the live one and describes the difference. The editing code stays exactly
+   as it was written and tested, and there is one place where a mutation can
+   be missed instead of twenty.
+
+   THE VERSION TOKEN. Every person and union carries `v`, the updated_at the
+   server last gave it. Field edits send it as `expect`. If somebody else
+   changed that person in the meantime the server refuses the batch with a
+   409 and the current row, rather than applying it — so a correction can
+   never quietly land on top of a correction it never saw.
+
+   THREE STATES, NOT TWO. The middle one is the dangerous one:
 
      'local'    no server here. This browser's own tree, in localStorage.
-     'shared'   the shared tree loaded, and writing it back is safe.
+     'shared'   the tree loaded, and writing to it is safe.
      'stalled'  a server answered but its copy did NOT load. Never write.
 
-   The old code set remote=true BEFORE parsing the response, so a read that
-   failed halfway left the page believing it was connected while holding an
-   empty tree — and the next edit PUT that empty tree over everybody's work.
-   A whole-blob PUT replaces the file; there is no partial write to survive.
+   Never write a tree we did not successfully read. A page that cannot read
+   says so and refuses to save. */
 
-   So the rule is now explicit: never write a tree we did not successfully
-   read. A page that cannot read says so and refuses to save. */
 let store = 'local', stalledWhy = '', timer = null;
+let treeId = null;          // which tree this deployment serves
+let headSeq = 0;            // how far down the change log this page has read
+let synced = null;          // the tree as the server last confirmed it
+let sending = false;        // a batch is in flight
+let poller = null;
+
+const POLL_MS = 4000;
+
+const copyState = () => JSON.parse(JSON.stringify(state));
+
+/* ── reading ─────────────────────────────────────────────────────────── */
 
 async function load(){
   let r = null;
-  try {
-    r = await fetch('/api/shared/' + KEY, { headers:{ Accept:'application/json' } });
-  } catch (e) { r = null; }        // no response at all
+  try { r = await fetch('/api/home', { headers:{ Accept:'application/json' } }); }
+  catch (e) { r = null; }
 
   if (r && r.ok && (r.headers.get('content-type') || '').includes('json')){
     try {
-      const d = await r.json();
-      // An absent value is a legitimate answer, not a failure: nobody has
-      // planted this tree yet. An unreadable one is a failure.
-      if (d && d.value) state = JSON.parse(d.value);
+      const home = await r.json();
+      if (!home || !home.treeId) throw new Error('the server named no tree');
+      treeId = home.treeId;
+      await pull();
       store = 'shared';
     } catch (e) {
       store = 'stalled';
-      stalledWhy = 'The copy on the server could not be read.';
+      stalledWhy = 'The tree could not be read (' + e.message + ').';
     }
   } else if (r && r.status === 404){
     // Nothing serving the API on this origin — a static host, or the page
@@ -3796,16 +3838,14 @@ async function load(){
     store = 'local';
   } else if (r){
     store = 'stalled';
-    stalledWhy = r.status === 410
-      ? 'This page is asking for a part of the server that has been retired.'
-      : `The server answered ${r.status}.`;
+    stalledWhy = `The server answered ${r.status}.`;
   } else if (location.protocol === 'file:'){
     store = 'local';
   } else {
-    // The page itself came from this origin moments ago, so a request that
-    // gets no response at all means the connection dropped — not that there
-    // is no server. Assuming "local" here is how a shared tree gets forked
-    // into a private one nobody else ever sees.
+    // The page came from this origin moments ago, so a request that gets
+    // nothing back means the connection dropped — not that there is no
+    // server. Assuming "local" here is how a shared tree gets forked into a
+    // private one nobody else ever sees.
     store = 'stalled';
     stalledWhy = 'The server could not be reached.';
   }
@@ -3824,6 +3864,307 @@ async function load(){
   updateWho();
   render();
   if (people().length) fit();
+  if (store === 'shared') startPolling();
+}
+
+// Read the whole tree and adopt it. Throws rather than half-adopting: a
+// partial tree gives quietly wrong kinship terms rather than missing ones.
+async function pull(){
+  const r = await fetch(`/api/tree/${treeId}/tree`, { headers:{ Accept:'application/json' } });
+  if (!r.ok) throw new Error('the server answered ' + r.status);
+  adopt(await r.json());
+}
+
+function adopt(tree){
+  const next = { people:{}, unions:{}, rootId:tree.rootId || null, seq:1,
+                 notDuplicates:[], lexicon:tree.lexicon || {} };
+  for (const p of tree.people){
+    next.people[p.id] = {
+      id:p.id, name:p.name, sex:p.sex || '', totem:p.totem || '',
+      born:p.born || '', died:p.died || '', root:!!p.is_root,
+      by:p.added_by || '', at:p.created_at, v:p.updated_at
+    };
+    if (p.aside_at){
+      next.people[p.id].aside = {
+        by:p.aside_by || '', at:p.aside_at, why:p.aside_why || '',
+        mergedInto:p.merged_into || null
+      };
+    }
+  }
+  for (const u of tree.unions){
+    next.unions[u.id] = { id:u.id, partners:u.partners.slice(),
+                          children:u.children.slice(), v:u.updated_at };
+  }
+  for (const [a, b] of (tree.notDuplicates || [])) next.notDuplicates.push(dismissedKey(a, b));
+  state = next;
+  // rootId is where the layout starts counting generations from — a property
+  // of the drawing, not of the family, so it is chosen here rather than
+  // stored. p.root is the family's actual claim ("furthest we can trace"),
+  // and a tree has as many of those as it has lines.
+  if (!state.people[state.rootId] || state.people[state.rootId].aside){
+    state.rootId = (Object.values(state.people).find(p => !p.aside) || {}).id || null;
+  }
+  headSeq = tree.seq;
+  synced = copyState();
+  if (meId && !state.people[meId]) meId = null;
+  if (sel && !state.people[sel]) sel = null;
+  history = [];              // undo cannot reach behind a shared refresh
+}
+
+/* ── what changed ────────────────────────────────────────────────────────
+   The difference between the tree the server confirmed and the tree on
+   screen, as the smallest set of ops that would produce it.
+
+   Order is not cosmetic: people must exist before a union can name them, and
+   a union must exist before anyone joins it. */
+function diffOps(was, now){
+  const ops = [];
+  const refOf = {};                       // local id -> "$ref" for new records
+
+  // ---- people ----
+  for (const id of Object.keys(now.people)){
+    const p = now.people[id], b = was.people[id];
+    if (!b){
+      refOf[id] = '$' + id;
+      ops.push({ op:'addPerson', ref:refOf[id], name:p.name, sex:p.sex,
+                 totem:p.totem, born:p.born, died:p.died, addedBy:p.by || '' });
+      if (p.root) ops.push({ op:'setRoot', personId:refOf[id], root:true });
+      continue;
+    }
+    const fields = {};
+    for (const f of ['name', 'sex', 'totem', 'born', 'died']){
+      if ((p[f] || '') !== (b[f] || '')) fields[f] = p[f] || '';
+    }
+    if (Object.keys(fields).length){
+      // `expect` is the whole of the concurrency guarantee: the server
+      // refuses this rather than applying it if somebody else has touched
+      // this person since we read them.
+      ops.push({ op:'updatePerson', id, expect:b.v, ...fields });
+    }
+    if (!!p.root !== !!b.root) ops.push({ op:'setRoot', personId:id, root:!!p.root });
+    if (p.aside && !b.aside)   ops.push({ op:'setAside', id, why:p.aside.why,
+                                          mergedInto:p.aside.mergedInto || undefined });
+    if (!p.aside && b.aside)   ops.push({ op:'restore', id });
+  }
+
+  const ref = id => refOf[id] || id;
+
+  // ---- unions ----
+  for (const uid of Object.keys(now.unions)){
+    const u = now.unions[uid], b = was.unions[uid];
+    if (!b){
+      const r = '$' + uid;
+      refOf[uid] = r;
+      ops.push({ op:'addUnion', ref:r });
+      u.partners.forEach(x => ops.push({ op:'addPartner', unionId:r, personId:ref(x) }));
+      u.children.forEach(x => ops.push({ op:'addChild',   unionId:r, personId:ref(x) }));
+      continue;
+    }
+    for (const x of u.partners){
+      if (!b.partners.includes(x)) ops.push({ op:'addPartner', unionId:uid, personId:ref(x) });
+    }
+    for (const x of b.partners){
+      if (!u.partners.includes(x)) ops.push({ op:'removePartner', unionId:uid, personId:x });
+    }
+    for (const x of u.children){
+      if (!b.children.includes(x)) ops.push({ op:'addChild', unionId:uid, personId:ref(x) });
+    }
+    for (const x of b.children){
+      if (!u.children.includes(x)) ops.push({ op:'removeChild', unionId:uid, personId:x });
+    }
+    // Same members, different order: birth order is real information, so it
+    // travels as its own op rather than as a remove-and-re-add that would
+    // lose the reason it changed.
+    const kept = u.children.filter(x => b.children.includes(x));
+    const before = b.children.filter(x => u.children.includes(x));
+    if (kept.length > 1 && kept.join() !== before.join()){
+      ops.push({ op:'reorderChildren', unionId:uid, orderedIds:u.children.map(ref) });
+    }
+  }
+
+  // A union that vanished locally: only merge does this, and only for unions
+  // it has already emptied. There is no removeUnion op — an empty union is
+  // harmless, and inventing a destructive one to tidy it up is exactly the
+  // trade this project does not make.
+
+  // ---- dismissed duplicate pairs ----
+  for (const k of (now.notDuplicates || [])){
+    if ((was.notDuplicates || []).includes(k)) continue;
+    const [a, b2] = k.split('|');
+    ops.push({ op:'dismissDuplicate', aId:ref(a), bId:ref(b2) });
+  }
+
+  // ---- words the family taught ----
+  const wasLex = was.lexicon || {}, nowLex = now.lexicon || {};
+  for (const shape of Object.keys(nowLex)){
+    const t = nowLex[shape], o = wasLex[shape];
+    if (!o || o.term !== t.term || (o.note || '') !== (t.note || '')){
+      ops.push({ op:'teachTerm', shape, term:t.term, note:t.note || '', by:t.by || '' });
+    }
+  }
+  for (const shape of Object.keys(wasLex)){
+    if (!nowLex[shape]) ops.push({ op:'forgetTerm', shape });
+  }
+
+  return ops;
+}
+
+/* ── writing ─────────────────────────────────────────────────────────── */
+
+function save(){
+  // A browser that could not read the tree does not get to write to it.
+  if (store === 'stalled') return;
+  clearTimeout(timer);
+  timer = setTimeout(flush, 400);
+}
+
+async function flush(){
+  if (store === 'local'){
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    return;
+  }
+  if (store !== 'shared' || sending || !synced) return;
+
+  const ops = diffOps(synced, state);
+  if (!ops.length) return;
+
+  sending = true;
+  try {
+    const r = await fetch(`/api/tree/${treeId}/ops`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'X-Muti-Actor': meName() },
+      body: JSON.stringify({ ops })
+    });
+
+    if (r.status === 409){
+      // Somebody else changed one of these records while this page was
+      // holding an older copy of it. The batch was NOT applied — which is
+      // the point. Take their version and say what happened, rather than
+      // letting either edit silently win.
+      let who = '';
+      try { const d = await r.json(); who = d.message || ''; } catch (e) {}
+      await refresh();
+      say('Somebody else was editing at the same time, so that change was not ' +
+          'saved. The tree has been refreshed — please make it again.');
+      showClash(who);
+      return;
+    }
+    if (!r.ok) throw new Error('the server answered ' + r.status);
+
+    const out = await r.json();
+    // Provisional ids become the ids the server minted. Everything that
+    // names them locally has to be renamed in the same breath.
+    for (const [refName, realId] of Object.entries(out.refs || {})){
+      remapId(refName.slice(1), realId);
+    }
+    headSeq = Math.max(headSeq, Number(out.seq) || 0);
+    synced = copyState();
+    // Versions moved for everything we touched; the next read settles them.
+    await refresh({ quiet:true });
+  } catch (e) {
+    store = 'stalled';
+    stalledWhy = 'The last change could not be saved (' + e.message + ').';
+    showStalled();
+  } finally {
+    sending = false;
+  }
+}
+
+/* Rename a provisional id to the one the server minted, everywhere it is
+   used. Missing one of these leaves a dangling reference that the next diff
+   would try to re-create as a second person. */
+function remapId(from, to){
+  if (from === to || !state.people[from] && !state.unions[from]) return;
+  if (state.people[from]){
+    state.people[to] = { ...state.people[from], id:to };
+    delete state.people[from];
+  }
+  if (state.unions[from]){
+    state.unions[to] = { ...state.unions[from], id:to };
+    delete state.unions[from];
+  }
+  for (const u of Object.values(state.unions)){
+    u.partners = u.partners.map(x => x === from ? to : x);
+    u.children = u.children.map(x => x === from ? to : x);
+  }
+  for (const p of Object.values(state.people)){
+    if (p.aside && p.aside.mergedInto === from) p.aside.mergedInto = to;
+  }
+  state.notDuplicates = (state.notDuplicates || []).map(k => {
+    const [a, b] = k.split('|');
+    return dismissedKey(a === from ? to : a, b === from ? to : b);
+  });
+  if (state.rootId === from) state.rootId = to;
+  if (meId === from){ meId = to; try { localStorage.setItem(ME_KEY, to); } catch (e) {} }
+  if (sel === from) sel = to;
+  if (fresh.has(from)){ fresh.delete(from); fresh.add(to); }
+}
+
+/* Re-read the tree, keeping where the reader is looking. */
+async function refresh({ quiet = false } = {}){
+  const keepSel = sel, keepMe = meId;
+  try { await pull(); } catch (e) {
+    store = 'stalled';
+    stalledWhy = 'The tree could not be re-read (' + e.message + ').';
+    showStalled();
+    return;
+  }
+  if (keepMe && state.people[keepMe]) meId = keepMe;
+  if (keepSel && state.people[keepSel]) sel = keepSel;
+  render();
+  if (!quiet) say('The tree has been refreshed.');
+}
+
+/* ── other people's changes ──────────────────────────────────────────────
+   A cheap "has anything happened?" against the change log, and a full re-read
+   only when something has. Re-reading rather than replaying each op means the
+   page cannot drift out of step with the server by mis-applying one: the
+   server's answer is always the whole truth, not a patch on top of a guess. */
+function startPolling(){
+  clearInterval(poller);
+  poller = setInterval(async () => {
+    if (store !== 'shared' || sending || pending) return;
+    // Unsent work of our own comes first — re-reading now would throw it away.
+    if (synced && diffOps(synced, state).length) return;
+    try {
+      const r = await fetch(`/api/tree/${treeId}/changes?since=${headSeq}`,
+                            { headers:{ Accept:'application/json' } });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d.changes || !d.changes.length) return;
+      const others = d.changes.filter(c => (c.by || '') !== meName());
+      await refresh({ quiet:true });
+      if (others.length){
+        const who = [...new Set(others.map(c => c.by).filter(Boolean))];
+        say(who.length ? `${who.join(' and ')} added to the tree.`
+                       : 'Somebody else added to the tree.');
+        showFromOthers(who, others.length);
+      }
+    } catch (e) { /* a missed poll is not an error; the next one will do */ }
+  }, POLL_MS);
+}
+
+/* A quiet line saying the tree moved under you, because a tree that changes
+   shape with no explanation reads as a bug. */
+function showFromOthers(who, n){
+  const el = $('others');
+  if (!el) return;
+  el.textContent = (who.length ? who.join(' and ') : 'Somebody else') +
+                   ` changed the tree — ${n} ${n === 1 ? 'change' : 'changes'} brought in.`;
+  el.hidden = false;
+  clearTimeout(showFromOthers.t);
+  showFromOthers.t = setTimeout(() => { el.hidden = true; }, 6000);
+}
+
+function showClash(detail){
+  const el = $('others');
+  if (!el) return;
+  el.textContent = 'Two of you edited the same person at once, so nothing was ' +
+                   'overwritten. The tree has been refreshed — please make your ' +
+                   'change again.';
+  el.hidden = false;
+  clearTimeout(showFromOthers.t);
+  showFromOthers.t = setTimeout(() => { el.hidden = true; }, 10000);
 }
 
 /* A stalled page is still a usable page to read, but it must never look like
@@ -3834,35 +4175,9 @@ function showStalled(){
   el.hidden = store !== 'stalled';
   if (store === 'stalled'){
     $('stalledWhy').textContent = stalledWhy;
+    clearInterval(poller);
     say('The shared tree did not load. Nothing will be saved.');
   }
-}
-
-function save(){
-  // The one line that matters: a browser that could not read the shared tree
-  // does not get to replace it.
-  if (store === 'stalled') return;
-  clearTimeout(timer);
-  timer = setTimeout(async () => {
-    const value = JSON.stringify(state);
-    if (store === 'shared'){
-      try {
-        const r = await fetch('/api/shared/' + KEY, { method:'PUT',
-          headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ value }) });
-        if (!r.ok) throw new Error('server answered ' + r.status);
-        return;
-      } catch (e) {
-        // A write that failed is not a write to retry into localStorage —
-        // that would fork the shared tree into a private copy. Stop, and say
-        // so, so the work can be re-entered rather than silently lost.
-        store = 'stalled';
-        stalledWhy = 'The last change could not be saved (' + e.message + ').';
-        showStalled();
-        return;
-      }
-    }
-    try { localStorage.setItem(KEY, value); } catch (e) {}
-  }, 400);
 }
 
 pos = { x:innerWidth/2, y:innerHeight*0.6, k:1 };

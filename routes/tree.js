@@ -5,7 +5,7 @@
 
 const express = require('express');
 const { applyOps } = require('../db/ops');
-const { bootstrap, changesSince, search, setAsideList } = require('../db/reads');
+const { bootstrap, fullTree, changesSince, search, setAsideList } = require('../db/reads');
 const { findDuplicates } = require('../db/duplicates');
 const { OpError } = require('../db/errors');
 
@@ -43,8 +43,29 @@ function sendError(res, e) {
 // identity and grants nothing. Real access control is the passphrase gate.
 const actorOf = req => String(req.get('x-muti-actor') || req.body?.by || '').slice(0, 120);
 
-module.exports = function treeRoutes(pool) {
+module.exports = function treeRoutes(pool, homeTreeId = null) {
   const r = express.Router();
+
+  /* Which tree this deployment serves, so the page does not have to be
+     configured with a UUID. Settled once at boot. */
+  r.get('/home', (req, res) => {
+    if (!homeTreeId) {
+      return res.status(503).json({
+        error: 'no_tree', message: 'the server has not finished choosing a tree' });
+    }
+    res.json({ treeId: homeTreeId });
+  });
+
+  /* The whole tree, plus the change-log position it was read at.
+
+     The page is an editor, not a viewer: it derives kinship, generations,
+     duplicates and layout from the whole graph, and a partial graph gives
+     wrong answers rather than missing ones. */
+  r.get('/tree/:id/tree', async (req, res) => {
+    try {
+      res.json(await fullTree(pool, req.params.id));
+    } catch (e) { sendError(res, e); }
+  });
 
   r.get('/trees', async (req, res) => {
     try {

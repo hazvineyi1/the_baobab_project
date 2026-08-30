@@ -16,6 +16,7 @@ const { createPool } = require('./db/pool');
 const { migrate } = require('./db/migrate');
 const treeRoutes = require('./routes/tree');
 const { trigramAvailable } = require('./db/reads');
+const { ensureHomeTree } = require('./db/home');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -23,15 +24,19 @@ app.use(express.json({ limit: '2mb' }));
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
 
-// The old whole-tree blob API (/api/shared/:key). Still on by default, because
-// the deployed frontend is still the one that speaks it.
+// The old whole-tree blob API (/api/shared/:key). OFF by default now that the
+// page speaks /api/tree/:id/ops.
 //
-// Once the tree has been migrated into the relational tables, leaving this on
-// is a genuine hazard: the old UI would keep writing the whole tree into
-// kv_store while the real data lives in the tables, and the two would diverge
-// silently with nobody being told. Turn it off with MW_BLOB_API=off at the
-// point the frontend has been switched over.
-const BLOB_API = (process.env.MW_BLOB_API || 'on').toLowerCase() !== 'off';
+// Leaving it on is a genuine hazard rather than a harmless fallback: anything
+// still writing through it puts the whole tree into kv_store while the real
+// data lives in the tables, and the two diverge silently with nobody being
+// told which one is right. A page from before the switch that finds it gone
+// gets a 410, which that page reads as "stalled" and refuses to write — so
+// the worst case is a stale tab that saves nothing, not one that saves into
+// the wrong place.
+//
+// MW_BLOB_API=on brings it back, for reading the old copy after the move.
+const BLOB_API = (process.env.MW_BLOB_API || 'off').toLowerCase() !== 'off';
 
 let db; // { get(key), set(key,value), del(key), list(prefix) }
 
@@ -44,10 +49,16 @@ async function setupDatabase() {
     // the two coexist until the tree has actually been migrated across.
     await migrate(pool);
 
+    // Settle which tree this deployment serves before the API is mounted,
+    // carrying the old blob across on the first boot that finds one. This
+    // throws rather than returning if the carry-over fails, so a broken move
+    // stops the deploy instead of serving the family an empty page.
+    const home = await ensureHomeTree(pool);
+
     // The relational API. Only available with a real database — the in-memory
     // fallback below exists so `npm start` works for a quick look, and it
     // cannot support transactions, constraints or incremental sync.
-    app.use('/api', treeRoutes(pool));
+    app.use('/api', treeRoutes(pool, home.treeId));
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS kv_store (
