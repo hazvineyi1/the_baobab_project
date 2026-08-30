@@ -92,6 +92,10 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
 
   const { rows: nd } = await pool.query(
     'SELECT a_id, b_id FROM not_duplicates WHERE tree_id = $1', [treeId]);
+  // The whole lexicon travels with every bootstrap. It is a handful of rows,
+  // and the client cannot name anything without it.
+  const { rows: terms } = await pool.query(
+    'SELECT shape, term, note, by, at FROM kin_terms WHERE tree_id = $1', [treeId]);
   const { rows: [{ total }] } = await pool.query(
     'SELECT count(*)::int AS total FROM people WHERE tree_id = $1', [treeId]);
   const { rows: rootRows } = await pool.query(
@@ -109,13 +113,15 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
     total,
     people: people.rows.map(p => ({ ...p, depth: depthOf[p.id] })),
     unions: unions.rows,
-    notDuplicates: nd.map(r => [r.a_id, r.b_id])
+    notDuplicates: nd.map(r => [r.a_id, r.b_id]),
+    lexicon: Object.fromEntries(terms.map(t =>
+      [t.shape, { term: t.term, note: t.note, by: t.by, at: t.at }]))
   };
 }
 
 const emptyResult = (treeId, seq) => ({
   treeId, focus: null, depth: 0, seq, rootId: null, total: 0,
-  people: [], unions: [], notDuplicates: []
+  people: [], unions: [], notDuplicates: [], lexicon: {}
 });
 
 async function headSeq(pool, treeId) {

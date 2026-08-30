@@ -336,6 +336,20 @@ body{
 }
 #form .relline.none{background:var(--pod-hi); color:var(--ink); border:1.5px dashed var(--pod-edge);}
 #form .relline.none b{color:var(--muted);}
+#form .relline.taught{background:var(--gold); color:var(--pod);}
+#form .teach{
+  margin:-4px 0 10px; padding:10px 11px; border-radius:0 0 12px 12px;
+  background:var(--pod-hi); border:1.5px solid var(--pod-edge); border-top:none;
+}
+#form .teach p{margin:0 0 8px; font-size:11.5px; line-height:1.5; color:var(--muted);}
+#form .teach p b{color:var(--ink);}
+#form .teach .fld{margin-bottom:0;}
+#form .teach .btn{flex:0 0 92px;}
+#form .taughtnote{margin:-4px 0 10px; font-size:10.5px; color:var(--muted);}
+.linkbtn{
+  background:none; border:none; padding:0; cursor:pointer; color:var(--gold);
+  font-family:'Karla',sans-serif; font-size:10.5px; font-weight:700; text-decoration:underline;
+}
 #form .covbar{
   height:7px; border-radius:99px; background:var(--pod-hi);
   border:1px solid var(--pod-edge); overflow:hidden; margin-bottom:6px;
@@ -990,8 +1004,56 @@ const possess = id => {
   return p ? p.name : 'them';
 };
 
-/* The term for `tid` as seen by `who`, with the trace that produced it. */
+/* Terms the family has taught the app.
+ 
+   This is the one thing about kinship that IS stored, and the distinction
+   matters. A term for a PAIR would go stale the moment somebody's parents were
+   added — that is why terms are derived. What is stored here is a term for a
+   SHAPE: "my husband's brother", "my daughter's husband's mother". The shape is
+   recomputed from the tree every time, so a taught term cannot go stale; it is
+   a rule, not an answer.
+ 
+   It fills the gap the app was built to leave open. Where Shona has a word the
+   engine knows — Tsano for a wife's brother — it says so. Where it does not,
+   it describes the relationship in plain words and invents nothing. Now it can
+   also ask, and the family can answer, and every structurally identical pair
+   in the tree is named from then on. That is how the calculator deepens: not
+   by inferring, but by being taught. */
+const lexicon = () => state.lexicon || (state.lexicon = {});
+
+function teachTerm(shape, term, note){
+  if (!shape || !term.trim()) return;
+  snapshot();
+  // Credited to whoever this device says it is, if they have said. There is no
+  // myName in this app — identity is a person in the tree, not a typed string.
+  const me = meId && state.people[meId];
+  lexicon()[shape] = { term: term.trim(), note: (note || '').trim(),
+                       by: me ? me.name : '', at: new Date().toISOString().slice(0, 10) };
+}
+function forgetTerm(shape){
+  if (!lexicon()[shape]) return;
+  snapshot();
+  delete state.lexicon[shape];
+}
+
+/* The term for `tid` as seen by `who`, with the trace that produced it.
+ 
+   A thin wrapper: the engine below is unchanged, and anything it names is
+   named exactly as before. Only where it comes back with no word does the
+   family's own lexicon get a say. */
 function relationship(who, tid, byBloodOnly){
+  const r = derive(who, tid, byBloodOnly);
+  if (r && !r.term && r.shape){
+    const taught = lexicon()[r.shape];
+    if (taught){
+      return { ...r, term: taught.term, taught: true,
+               why: `${r.why} — your family calls this ${taught.term}` };
+    }
+  }
+  return r;
+}
+
+function derive(who, tid, byBloodOnly){
   if (!who || !tid || !state.people[who] || !state.people[tid]) return null;
   if (who === tid) return { term:'You', why:'this is you' };
 
@@ -1099,11 +1161,24 @@ function marriedIn(who, tid){
     const r = relationship(sp, tid, true);
     if (!r || !r.term) continue;
     const spouse = state.people[sp];
-    if (spouse.sex === 'f' && r.why && r.why.includes('brother or sister')){
+    const sibOfSpouse = r.why && r.why.includes('brother or sister');
+    if (spouse.sex === 'f' && sibOfSpouse){
       if (them.sex === 'm') return { term:'Tsano', why:"your wife's brother" };
       if (them.sex === 'f') return { term:'Muramu', why:"your wife's sister" };
     }
-    return { term:null, why:`married into the family — ${spouse.name}'s ${r.term}` };
+    // Tsano and Muramu are a husband's words for his wife's siblings. A wife's
+    // words for her husband's siblings are the question this app was told to
+    // ask rather than answer — so it describes, and offers to be told.
+    const via = sibOfSpouse ? 'sibling' : (r.term || 'relative');
+    return {
+      term: null,
+      shape: `inlaw:through-my-${spouse.sex === 'f' ? 'wife' : spouse.sex === 'm' ? 'husband' : 'spouse'}` +
+             `:their-${via}:${them.sex === 'f' ? 'woman' : them.sex === 'm' ? 'man' : 'unknown'}`,
+      plain: `${spouse.sex === 'f' ? "your wife's" : spouse.sex === 'm' ? "your husband's" : "your spouse's"} ` +
+             `${sibOfSpouse ? (them.sex === 'f' ? 'sister' : them.sex === 'm' ? 'brother' : 'sibling')
+                            : (r.term || 'relative')}`,
+      why: `married into the family — ${spouse.name}'s ${r.term}`
+    };
   }
 
   // married to one of yours
@@ -1114,7 +1189,12 @@ function marriedIn(who, tid){
       if (them.sex === 'f') return { term:'Muroora', why:"your son's or daughter's wife" };
       if (them.sex === 'm') return { term:'Mukuwasha', why:"your daughter's or son's husband" };
     }
-    if (r.term) return { term:null, why:`married to your ${r.term} (${possess(sp)})` };
+    if (r.term) return {
+      term: null,
+      shape: `inlaw:married-to-my:${r.term}:${them.sex === 'f' ? 'woman' : them.sex === 'm' ? 'man' : 'unknown'}`,
+      plain: `the ${them.sex === 'f' ? 'wife' : them.sex === 'm' ? 'husband' : 'spouse'} of your ${r.term}`,
+      why: `married to your ${r.term} (${possess(sp)})`
+    };
   }
   return null;
 }
@@ -2227,10 +2307,45 @@ function kinVerdict(from, to){
   const r = relationship(from, to);
   if (!r) return '';
   const term = r.term || r.choice;
-  return `<p class="relline${term ? '' : ' none'}">` +
+  const head = `<p class="relline${term ? '' : ' none'}${r.taught ? ' taught' : ''}">` +
     `<b>${esc(term || 'Not named')}</b>` +
     `<span>${esc(kinName(to))} is ${esc(kinName(from))}'s ${term ? esc(term) : 'relative'} ` +
     `— ${esc(r.why)}</span></p>`;
+
+  // Where the app has a shape but no word for it, ask. This is the whole
+  // mechanism: it never guesses, and it never stays ignorant either.
+  if (!r.term && r.shape){
+    return head +
+      `<div class="teach" data-shape="${esc(r.shape)}">` +
+        `<p>Shona may have a word for <b>${esc(r.plain || 'this')}</b> that this app ` +
+        `does not know. If your family uses one, name it — every pair related ` +
+        `this way will carry it from then on.</p>` +
+        `<div class="row">` +
+          `<input class="fld teachterm" placeholder="The word your family uses" autocomplete="off">` +
+          `<button type="button" class="btn teachgo">Name it</button>` +
+        `</div>` +
+      `</div>`;
+  }
+  if (r.taught){
+    const t = lexicon()[r.shape] || {};
+    return head +
+      `<p class="taughtnote">Taught by your family${t.by ? ` (${esc(t.by)})` : ''}` +
+      `${t.at ? ` on ${esc(t.at)}` : ''} · ` +
+      `<button type="button" class="linkbtn" data-forget="${esc(r.shape)}">remove</button></p>`;
+  }
+  return head;
+}
+
+// A plain-language rendering of a shape, for the list of what has been taught.
+function shapeLabel(shape){
+  const p = String(shape).split(':');
+  if (p[0] !== 'inlaw') return shape;
+  if (p[1] === 'married-to-my') return `the ${p[3] === 'woman' ? 'wife' : p[3] === 'man' ? 'husband' : 'spouse'} of your ${p[2]}`;
+  const who = p[1].replace('through-my-', '');
+  const rel = p[2].replace('their-', '');
+  const sexed = rel === 'sibling'
+    ? (p[3] === 'woman' ? 'sister' : p[3] === 'man' ? 'brother' : 'sibling') : rel;
+  return `your ${who}'s ${sexed}`;
 }
 
 function openKinship(){
@@ -2277,8 +2392,17 @@ function openKinship(){
         gapRow(cov.gaps.unlinked.length, 'no traced link between them',
                'add the people in between') +
         gapRow(cov.gaps.described.length, 'described rather than named',
-               'the family has no single word for these; the app will not invent one') +
+               'pick the pair above and tell the app what your family calls it') +
         `</div>`) +
+
+    (Object.keys(lexicon()).length
+      ? `<p class="lbl" style="margin-top:14px;">Words your family has taught it</p>` +
+        Object.entries(lexicon()).map(([shape, t]) =>
+          `<div class="askrow"><u>${esc(t.term)}` +
+            `<small>${esc(shapeLabel(shape))}${t.by ? ` · ${esc(t.by)}` : ''}</small></u>` +
+            `<button type="button" class="linkbtn" data-forget="${esc(shape)}">remove</button>` +
+          `</div>`).join('')
+      : '') +
 
     (cov.asks.length
       ? `<p class="lbl" style="margin-top:12px;">Ask about these next</p>` +
@@ -2314,6 +2438,21 @@ function openKinship(){
     inp.addEventListener('focus', show);
   });
   el.querySelectorAll('[data-ask]').forEach(b => b.onclick = () => openCard(b.dataset.ask));
+  el.querySelectorAll('.teach').forEach(box => {
+    const input = box.querySelector('.teachterm');
+    const commit = () => {
+      if (!input.value.trim()) { input.focus(); return; }
+      teachTerm(box.dataset.shape, input.value);
+      render(); save();
+      say(`${input.value.trim()} recorded. Every pair related this way now carries it.`);
+      openKinship();
+    };
+    box.querySelector('.teachgo').onclick = commit;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); commit(); } });
+  });
+  el.querySelectorAll('[data-forget]').forEach(b => b.onclick = () => {
+    forgetTerm(b.dataset.forget); render(); save(); openKinship();
+  });
   $('kNo').onclick = closeForm;
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
@@ -2963,6 +3102,7 @@ async function load(){
   }
   if (!state || !state.people) state = { people:{}, unions:{}, rootId:null, seq:1 };
   if (!state.notDuplicates) state.notDuplicates = [];
+  if (!state.lexicon) state.lexicon = {};
   try {
     const saved = localStorage.getItem(ME_KEY);
     if (saved && state.people[saved]) meId = saved;

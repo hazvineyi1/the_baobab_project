@@ -341,6 +341,35 @@ const HANDLERS = {
     return { aId: a, bId: b };
   },
 
+  /* A word the family has supplied for a relationship the app could not name.
+     Keyed on the SHAPE of the relationship, not on the pair — see
+     migrations/004 for why that distinction is what makes storing it safe. */
+  async teachTerm(ctx, op) {
+    const { client, treeId, actor } = ctx;
+    const shape = String(op.shape || '').trim();
+    const term = String(op.term || '').trim();
+    if (!shape) throw badRequest('teachTerm needs the shape of the relationship');
+    if (!term) throw badRequest('teachTerm needs a term');
+    await client.query(
+      `INSERT INTO kin_terms (tree_id, shape, term, note, by) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (tree_id, shape) DO UPDATE SET
+         term = EXCLUDED.term, note = EXCLUDED.note,
+         by = EXCLUDED.by, at = clock_timestamp()`,
+      [treeId, shape, term, String(op.note || '').trim(), op.by || actor || '']);
+    await logChange(client, treeId, 'term', null, 'teachTerm', { shape, term }, actor);
+    return { shape, term };
+  },
+
+  async forgetTerm(ctx, op) {
+    const { client, treeId, actor } = ctx;
+    const shape = String(op.shape || '').trim();
+    if (!shape) throw badRequest('forgetTerm needs the shape of the relationship');
+    await client.query('DELETE FROM kin_terms WHERE tree_id = $1 AND shape = $2',
+                       [treeId, shape]);
+    await logChange(client, treeId, 'term', null, 'forgetTerm', { shape }, actor);
+    return { shape };
+  },
+
   async mergePeople(ctx, op) {
     const { client, treeId, actor, resolve } = ctx;
     const keepId = resolve(op.keepId, 'mergePeople.keepId');

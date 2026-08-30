@@ -121,6 +121,38 @@ const { bootstrap, changesSince, search } = require('../db/reads');
   eq('paging returns at most the limit', paged.changes.length, 2);
   check('and says there is more to fetch', paged.more === true);
 
+  section('words the family has taught the app travel with the tree');
+  await applyOps(pool, tree, [
+    { op:'teachTerm', shape:'inlaw:through-my-husband:their-sibling:man',
+      term:'Vatete vevarume', note:'as this family says it' },
+    { op:'teachTerm', shape:'inlaw:through-my-husband:their-sibling:woman',
+      term:'Muramu wangu' }
+  ], 'hazvi');
+  const withTerms = await bootstrap(pool, tree, { depth: 2 });
+  eq('both taught words come back with the bootstrap',
+     Object.keys(withTerms.lexicon).length, 2);
+  eq('with the word itself',
+     withTerms.lexicon['inlaw:through-my-husband:their-sibling:man'].term,
+     'Vatete vevarume');
+  eq('and who taught it', withTerms.lexicon['inlaw:through-my-husband:their-sibling:man'].by, 'hazvi');
+
+  await applyOps(pool, tree, [
+    { op:'teachTerm', shape:'inlaw:through-my-husband:their-sibling:man', term:'Babamunini' }
+  ], 'someone-else');
+  eq('teaching the same shape again corrects it rather than duplicating',
+     (await bootstrap(pool, tree, { depth: 2 }))
+       .lexicon['inlaw:through-my-husband:their-sibling:man'].term, 'Babamunini');
+
+  await applyOps(pool, tree, [
+    { op:'forgetTerm', shape:'inlaw:through-my-husband:their-sibling:woman' }], 'hazvi');
+  eq('a word can be taken back',
+     Object.keys((await bootstrap(pool, tree, { depth: 2 })).lexicon).length, 1);
+
+  await rejects('a blank word is refused', () =>
+    applyOps(pool, tree, [{ op:'teachTerm', shape:'x', term:'   ' }]), { status: 400 });
+  await rejects('a word with no relationship shape is refused', () =>
+    applyOps(pool, tree, [{ op:'teachTerm', shape:'', term:'Something' }]), { status: 400 });
+
   section('unknown trees');
   await rejects('bootstrap on a missing tree is a 404', () =>
     bootstrap(pool, '00000000-0000-4000-8000-000000000000', {}), { status: 404 });

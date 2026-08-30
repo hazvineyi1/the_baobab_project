@@ -83,6 +83,10 @@ function normaliseBaobab(parsed) {
   return {
     people, unions,
     notDuplicates: (parsed.notDuplicates || []).map(pair => pair.map(String)),
+    // Words the family taught the app. Losing these would mean asking a
+    // relative the same question twice, which is exactly what recording them
+    // was meant to prevent.
+    lexicon: parsed.lexicon && typeof parsed.lexicon === 'object' ? parsed.lexicon : {},
     rootId: parsed.rootId != null ? String(parsed.rootId) : null
   };
 }
@@ -154,9 +158,11 @@ function normaliseLegacy(parsed) {
   return {
     people,
     unions: [...unions.values()],
-    // The old shape had no dismissal list. Nothing to lose, but say so rather
-    // than silently producing an empty array that looks like data loss.
+    // The old shape had neither a dismissal list nor a lexicon. Nothing to
+    // lose, but say so rather than silently producing empties that look like
+    // data loss.
     notDuplicates: [],
+    lexicon: {},
     rootId: null
   };
 }
@@ -266,12 +272,23 @@ async function loadInto(client, treeId, data) {
     dismissals++;
   }
 
+  let terms = 0;
+  for (const [shape, t] of Object.entries(data.lexicon || {})){
+    if (!shape || !t || !String(t.term || '').trim()) continue;
+    await client.query(
+      `INSERT INTO kin_terms (tree_id, shape, term, note, by) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (tree_id, shape) DO UPDATE SET
+         term = EXCLUDED.term, note = EXCLUDED.note, by = EXCLUDED.by`,
+      [treeId, shape, String(t.term).trim(), String(t.note || ''), String(t.by || '')]);
+    terms++;
+  }
+
   if (data.rootId && idOf.has(data.rootId)) {
     await client.query('UPDATE people SET is_root = false WHERE tree_id = $1', [treeId]);
     await client.query('UPDATE people SET is_root = true WHERE id = $1', [idOf.get(data.rootId)]);
   }
 
-  return { idOf, unionIdOf, partnerLinks, childLinks, dismissals, skipped };
+  return { idOf, unionIdOf, partnerLinks, childLinks, dismissals, terms, skipped };
 }
 
 // Count both sides and compare. A migration that reports success without
@@ -305,11 +322,15 @@ async function verify(client, treeId, data, loaded) {
     unions: data.unions.length,
     partnerLinks: loaded.partnerLinks,
     childLinks: loaded.childLinks,
-    dismissals: loaded.dismissals
+    dismissals: loaded.dismissals,
+    terms: loaded.terms
   };
+  const dbTerms = await one(
+    'SELECT count(*)::int n FROM kin_terms WHERE tree_id=$1', [treeId]);
   const actual = {
     people: dbPeople, unions: dbUnions,
-    partnerLinks: dbPartners, childLinks: dbChildren, dismissals: dbDismissals
+    partnerLinks: dbPartners, childLinks: dbChildren, dismissals: dbDismissals,
+    terms: dbTerms
   };
 
   const mismatches = Object.keys(expected)
@@ -369,7 +390,8 @@ async function run(pool, { apply = false, key = null, treeName = 'The Baobab Pro
       unions: data.unions.length,
       partnerLinks: data.unions.reduce((n, u) => n + u.partners.length, 0),
       childLinks: data.unions.reduce((n, u) => n + u.children.length, 0),
-      dismissals: data.notDuplicates.length
+      dismissals: data.notDuplicates.length,
+      terms: Object.keys(data.lexicon || {}).length
     }
   };
   if (!apply) return summary;

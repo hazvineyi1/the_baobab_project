@@ -36,7 +36,12 @@ const BAOBAB = {
   },
   rootId: 'p1',
   seq: 40,
-  notDuplicates: [['p7', 'p11']]     // the two Garikais: judged, and different
+  notDuplicates: [['p7', 'p11']],    // the two Garikais: judged, and different
+  // A word this family taught the app, which must survive the move.
+  lexicon: {
+    'inlaw:through-my-husband:their-sibling:man':
+      { term: 'Vatete vevarume', note: 'as this family says it', by: 'Rufaro', at: '2026-08-30' }
+  }
 };
 
 // The same family in the older shape the deployed app actually wrote.
@@ -86,7 +91,7 @@ const idOf = async (pool, tree, legacy) => (await pool.query(
   const dry = await run(pool, { apply: false });
   eq('the shape is detected, not assumed', dry.shape, 'baobab');
   eq('counts are reported from the blob', dry.counts,
-     { people: 11, unions: 4, partnerLinks: 7, childLinks: 7, dismissals: 1 });
+     { people: 11, unions: 4, partnerLinks: 7, childLinks: 7, dismissals: 1, terms: 1 });
   eq('a dry run writes no people', 
      (await pool.query('SELECT count(*)::int n FROM people')).rows[0].n, 0);
 
@@ -100,6 +105,10 @@ const idOf = async (pool, tree, legacy) => (await pool.query(
   eq('every partner link arrived', r.verification.actual.partnerLinks, 7);
   eq('every child link arrived', r.verification.actual.childLinks, 7);
   eq('the dismissal arrived', r.verification.actual.dismissals, 1);
+  eq('the taught word arrived', r.verification.actual.terms, 1);
+  eq('with its wording intact',
+     (await pool.query('SELECT term, by FROM kin_terms WHERE tree_id=$1', [tree])).rows[0],
+     { term: 'Vatete vevarume', by: 'Rufaro' });
 
   section('the blob was backed up before anything was written');
   const bk = (await pool.query(
@@ -200,6 +209,8 @@ const idOf = async (pool, tree, legacy) => (await pool.query(
   eq('the older shape is detected', L.shape, 'legacy');
   eq('verification found no mismatches', L.verification.mismatches, []);
   eq('every person arrived', L.verification.actual.people, 12);
+  eq('the older shape has no lexicon, and that is reported as zero rather than lost',
+     L.verification.actual.terms, 0);
   const t2 = L.treeId;
 
   eq('sex M/F was converted to m/f',

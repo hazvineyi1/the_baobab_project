@@ -242,6 +242,34 @@ relative is the one that settles the most. That is the part that improves as
 the family is entered: the rules never change, but the tree's ability to apply
 them grows with every birth year and every link.
 
+### Being taught
+
+Where the engine has no word, it describes the relationship and asks. If the
+family answers, the word is kept — and every structurally identical pair in the
+tree carries it from then on.
+
+This is the one part of kinship that is **stored**, and the distinction is what
+makes storing it safe. A term for a *pair* would go stale the moment somebody's
+parents were added — which is exactly why terms are derived. What is stored is
+a term for a **shape**: `inlaw:through-my-husband:their-sibling:man`, meaning
+"my husband's brother". The shape is recomputed from the tree on every read, so
+a taught term cannot go stale. It is a rule the family supplied, not an answer
+cached.
+
+It fills the gap this app was deliberately built to leave open. Tsano and
+Muramu are a husband's words for his wife's siblings; a wife's words for her
+husband's siblings were the open question, and the instruction was to ask
+rather than invent. Now the app can ask, and the answer belongs to the family
+that gave it — credited, dated, and removable.
+
+Shapes are precise enough to generalise and no further: teaching a word for a
+husband's *brother* leaves a husband's *sister* still unnamed, because those
+are different shapes and may well be different words.
+
+Stored in `kin_terms` (migration 004), written by the `teachTerm` and
+`forgetTerm` ops, returned whole with every bootstrap, and carried across by
+the blob migration — teaching a word and then migrating must not lose it.
+
 ### Why it is not a learned model
 
 The engine is rule-based, and that is a correctness decision rather than a
