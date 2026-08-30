@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Muti weMhuri — Shona Family Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Work+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-deep:#141F17;
+    --bg-panel:#1C2A1F;
+    --card:#233421;
+    --card-border:#3A4E36;
+    --gold:#C7A24A;
+    --gold-soft:#E4CD8C;
+    --clay:#A15F33;
+    --sage:#7E9468;
+    --sage-line:#5A6E4E;
+    --parchment:#F1EAD6;
+    --muted:#9FAE93;
+    --danger:#B5544A;
+    --radius-leaf: 22px 6px 22px 6px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg-deep);color:var(--parchment);font-family:'Work Sans',sans-serif;}
+  body{padding:28px 20px 80px;min-height:100vh;}
+  .wrap{max-width:1200px;margin:0 auto;}
+
+  header.top{margin-bottom:18px;}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:clamp(28px,4vw,42px);margin:0 0 4px;color:var(--parchment);letter-spacing:0.2px;}
+  h1 .accent{color:var(--gold-soft);font-style:italic;font-weight:500;}
+  .subtitle{color:var(--muted);font-size:14.5px;max-width:640px;line-height:1.5;margin:0 0 16px;}
+
+  .toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px;}
+  .toolbar select, .toolbar button, .btn{
+    font-family:'Work Sans',sans-serif;font-size:13.5px;font-weight:500;
+    background:var(--card);color:var(--parchment);border:1px solid var(--card-border);
+    padding:8px 13px;border-radius:8px;cursor:pointer;transition:border-color .15s, background .15s;
+  }
+  .toolbar select{padding-right:8px;}
+  .toolbar button:hover,.btn:hover{border-color:var(--gold);}
+  .btn-primary{background:var(--gold);color:#20200F;border-color:var(--gold);font-weight:600;}
+  .btn-primary:hover{background:var(--gold-soft);}
+  .btn-ghost{background:transparent;}
+  .btn-danger{border-color:var(--danger);color:var(--danger);background:transparent;}
+  .btn-danger:hover{background:rgba(181,84,74,0.12);}
+
+  .legend{
+    background:var(--bg-panel);border:1px solid var(--card-border);border-radius:14px;
+    padding:18px 22px;margin:14px 0 26px;line-height:1.65;font-size:14px;color:var(--parchment);
+    display:none;
+  }
+  .legend.open{display:block;}
+  .legend h2{font-family:'Fraunces',serif;font-weight:600;font-size:19px;color:var(--gold-soft);margin:0 0 10px;}
+  .legend h3{font-size:14px;color:var(--gold-soft);margin:16px 0 4px;font-family:'Work Sans',sans-serif;font-weight:600;}
+  .legend p{margin:0 0 8px;color:#DCE2CE;}
+  .legend .termlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px 18px;margin:8px 0;}
+  .legend .termlist div{font-size:13px;color:var(--muted);}
+  .legend .termlist b{color:var(--parchment);font-weight:600;}
+  .legend .note{font-size:12.5px;color:var(--muted);border-top:1px solid var(--card-border);margin-top:14px;padding-top:12px;}
+
+  .forest{position:relative;display:flex;flex-direction:column;align-items:center;gap:70px;padding:10px 20px 60px;overflow-x:auto;}
+
+  /* ---- top-down tree (default): great-grandparents anchor the top, branches fan out below ---- */
+  .node{display:flex;flex-direction:column;align-items:center;}
+  .children-row{
+    display:flex;flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:flex-start;
+    gap:28px 36px;margin-top:34px;
+  }
+  .child-slot{display:flex;}
+  #connectorSvg line{stroke:var(--sage-line);stroke-width:2px;}
+
+  /* ---- left-to-right orientation: root at the left edge, generations flow right ---- */
+  .forest.ltr{align-items:flex-start;}
+  .forest.ltr .node{flex-direction:row;align-items:center;}
+  .forest.ltr .children-row{
+    flex-direction:column;flex-wrap:nowrap;justify-content:center;align-items:flex-start;
+    gap:22px;margin-top:0;margin-left:40px;
+  }
+
+  .fold-btn{margin-top:2px;}
+  .unit{display:flex;flex-direction:column;align-items:center;gap:8px;position:relative;z-index:1;}
+  .couple-row{display:flex;align-items:center;gap:6px;}
+  .knot{color:var(--gold);font-size:15px;opacity:.8;}
+
+  .card{
+    background:var(--card);border:1px solid var(--card-border);border-radius:var(--radius-leaf);
+    padding:10px 14px 9px;min-width:150px;text-align:center;position:relative;
+    box-shadow:0 3px 10px rgba(0,0,0,.25);
+  }
+  .card.is-me{border-color:var(--gold);box-shadow:0 0 0 2px rgba(199,162,74,.35),0 3px 10px rgba(0,0,0,.25);}
+  .card .name{
+    width:100%;background:transparent;border:none;color:var(--parchment);font-family:'Fraunces',serif;
+    font-size:15.5px;font-weight:500;text-align:center;border-bottom:1px dashed transparent;padding:2px 0;
+  }
+  .card .name:hover, .card .name:focus{border-bottom-color:var(--sage-line);outline:none;}
+  .card .sexrow{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:2px;}
+  .field-label{
+    font-size:9px;letter-spacing:0.06em;text-transform:uppercase;color:var(--muted);
+    opacity:.75;margin:8px 0 1px;font-family:'Work Sans',sans-serif;
+  }
+  .card .field-label:first-child{margin-top:0;}
+  .card .totem{
+    width:100%;background:transparent;border:none;color:var(--muted);font-family:'Work Sans',sans-serif;
+    font-size:11px;text-align:center;border-bottom:1px dashed transparent;padding:1px 0;font-style:italic;
+  }
+  .card .totem:hover, .card .totem:focus{border-bottom-color:var(--sage-line);outline:none;}
+  .card .addedby{font-size:9.5px;color:var(--muted);opacity:.7;margin-top:3px;}
+  .card select.sex{
+    background:transparent;color:var(--muted);border:none;font-size:11px;font-family:'Work Sans',sans-serif;
+  }
+  .term-tag{
+    display:inline-block;margin-top:5px;font-size:11.5px;padding:2px 9px;border-radius:20px;
+    background:rgba(126,148,104,0.18);color:var(--sage);border:1px solid rgba(126,148,104,0.35);
+  }
+  .term-tag.skew{background:rgba(199,162,74,0.16);color:var(--gold-soft);border-color:rgba(199,162,74,0.4);}
+  .term-tag.me{background:var(--gold);color:#20200F;border-color:var(--gold);font-weight:600;}
+  .cat{display:block;font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;}
+
+  .mini-actions{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;margin-top:2px;}
+  .mini-btn{
+    font-size:10.5px;padding:3px 8px;border-radius:6px;border:1px solid var(--card-border);
+    background:transparent;color:var(--muted);cursor:pointer;
+  }
+  .mini-btn:hover{color:var(--gold-soft);border-color:var(--gold);}
+  .card-extra{margin-top:4px;}
+  .sprout-btn{color:var(--gold-soft);border-color:rgba(199,162,74,0.55);}
+  .sprout-btn:hover{background:rgba(199,162,74,0.12);}
+  .order-btns{display:flex;flex-direction:column;position:absolute;right:-20px;top:6px;gap:1px;}
+  .order-btns button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:10px;line-height:1;padding:2px;}
+  .order-btns button:hover{color:var(--gold-soft);}
+
+  .inline-form{
+    margin-top:6px;background:var(--bg-panel);border:1px solid var(--card-border);border-radius:10px;
+    padding:10px;display:flex;flex-direction:column;gap:6px;min-width:190px;
+  }
+  .inline-form input[type=text]{
+    background:var(--bg-deep);border:1px solid var(--card-border);color:var(--parchment);
+    border-radius:6px;padding:6px 8px;font-size:13px;font-family:'Work Sans',sans-serif;
+  }
+  .inline-form .row{display:flex;gap:6px;}
+  .inline-form select{background:var(--bg-deep);color:var(--parchment);border:1px solid var(--card-border);border-radius:6px;font-size:13px;}
+  .inline-form .actions{display:flex;gap:6px;justify-content:flex-end;}
+  .inline-form .actions button{font-size:12px;padding:5px 10px;border-radius:6px;border:1px solid var(--card-border);background:var(--card);color:var(--parchment);cursor:pointer;}
+  .inline-form .actions .go{background:var(--gold);color:#20200F;border-color:var(--gold);font-weight:600;}
+
+  .confirm-bar{background:var(--bg-panel);border:1px solid var(--danger);border-radius:10px;padding:10px 14px;display:flex;gap:10px;align-items:center;margin-bottom:14px;font-size:13.5px;}
+
+  footer.note{color:var(--muted);font-size:12px;margin-top:30px;line-height:1.5;max-width:700px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Muti we<span class="accent">Mhuri</span></h1>
+    <p class="subtitle">A shared family tree — anchored at the top by default, with a "⇅/⇄" toggle to switch to left-to-right for very deep lines. Any branch can fold itself away with "▾ fold branch" once it gets crowded. Anyone with this page can add to it. Pick someone as "you" below and every label recalculates around them.</p>
+    <div class="toolbar">
+      <input id="contributorName" type="text" placeholder="Your name (tags what you add)" style="width:200px;">
+      <select id="egoSelect"></select>
+      <button id="refreshBtn" class="btn-ghost" title="Pull in anything others have added">↻ Refresh</button>
+      <button id="orientBtn" class="btn-ghost" title="Switch between top-down and left-to-right">⇅ Top-down</button>
+      <button id="newBranchBtn" class="btn-ghost" title="Start a separate, unconnected line — useful for a different aspect of the family">+ New branch</button>
+      <button id="toggleLegend">How this works ▾</button>
+      <button id="resetBtn" class="btn-ghost">Reset tree</button>
+    </div>
+  </header>
+
+  <div id="confirmBar" class="confirm-bar" style="display:none;">
+    <span>Erase the whole shared tree for everyone and start over? This can't be undone.</span>
+    <button class="btn btn-danger" id="confirmYes">Yes, erase it</button>
+    <button class="btn" id="confirmNo">Cancel</button>
+  </div>
+
+  <div class="legend" id="legend">
+    <h2>Why there's no "aunt," "uncle," or "cousin"</h2>
+    <p>English kinship is <b>descriptive</b> — it names an exact biological link, so every relative gets a distinct label. Shona kinship is <b>classificatory</b> — it groups relatives by generation, side of the family, and seniority, so whole categories of people share one term.</p>
+    <h3>Your parents' generation</h3>
+    <div class="termlist">
+      <div><b>Babamukuru</b> — father's older brother (a senior "father")</div>
+      <div><b>Babamunini</b> — father's younger brother (a junior "father")</div>
+      <div><b>Amaiguru</b> — mother's older sister (a senior "mother")</div>
+      <div><b>Amainini</b> — mother's younger sister (a junior "mother")</div>
+      <div><b>Tete</b> — father's sister, any age (her own distinct, senior role)</div>
+      <div><b>Sekuru</b> — mother's brother, any age (his own distinct, respected role)</div>
+    </div>
+    <h3>Your own generation</h3>
+    <p>Children of your father's brothers or your mother's sisters are your <b>siblings</b> — Mukoma/Munin'ina if the same sex as you, Hanzvadzi if not — never "cousins." Children of your father's sister or your mother's brother are cross-cousins, and the terms skew sideways instead: you and your mother's-brother's children call each other <b>Sekuru / Muzukuru</b>; you and your father's-sister's children call each other <b>Muzukuru / Sekuru</b> the other way.</p>
+    <h3>Deeper down the tree</h3>
+    <p>That sideways skew doesn't stop at first cousins. Traditionally your mother's whole line of brothers, and their sons, and their sons' sons, keep being called <b>Sekuru</b> no matter how many generations pass — and the mirror line, through a father's sister's descendants, keeps being called <b>Muzukuru</b>. This tool applies that rule automatically once your tree grows past first cousins.</p>
+    <h3>Elders and in-laws</h3>
+    <div class="termlist">
+      <div><b>Sekuru / Ambuya</b> — both grandfathers / both grandmothers, and beyond</div>
+      <div><b>Muzukuru</b> — grandchildren, nieces, nephews, and further descendants</div>
+      <div><b>Tsano</b> — wife's brother</div>
+      <div><b>Muramu</b> — wife's sister</div>
+      <div><b>Mukuwasha / Muroora</b> — son-in-law / daughter-in-law</div>
+      <div><b>Murume / Mukadzi</b> — husband / wife</div>
+    </div>
+    <h3>Totem — Mutupo / Chidao</h3>
+    <p>Every Shona person also carries a <b>mutupo</b> (totem, often an animal — Shumba/lion, Nzou/elephant, Shava/eland, Moyo/heart, Soko/monkey, and many more) plus a linked praise name, or <b>chidao</b>. It passes down the father's line only — you take your father's totem, not your mother's — which is exactly why it maps onto the same patriline that "Baba," "Sekuru," and "Muzukuru" already trace. Sharing a totem marks two people as belonging to the same clan even generations apart with no traceable link on paper, and marrying within your own totem is traditionally avoided. There's a field on each card to record it as your tree grows.</p>
+    <h3>Relationships beyond blood and marriage</h3>
+    <div class="termlist">
+      <div><b>Sahwira</b> — a chosen, non-blood ceremonial friend, often bound to a specific family for generations; carries real duties at funerals and other rites of passage</div>
+      <div><b>Chiramu</b> — the licensed, joking familiarity between a man and his wife's younger sisters (muramu)</div>
+      <div><b>Roora</b> — bride-wealth paid by the groom's family to the bride's; it's the ceremony where Tete and Sekuru formally exercise their negotiating roles, so it's woven into why those two terms carry real authority rather than just naming a relative</div>
+    </div>
+    <p class="note">Usage shifts by clan, region, and family — and families disagree on details like whether cousin-seniority follows the parents' birth order or the cousins' own ages (this tool defaults to the parents' order; use the ▲▼ arrows to re-rank siblings if yours works differently). Treat this as a solid starting frame, not the final word — refine it together as your tree grows.</p>
+  </div>
+
+  <div id="forest" class="forest"></div>
+
+  <footer class="note">This tree is <b>shared</b> — anyone who opens this page can see and add to it, so avoid sensitive personal details. Every person — including a spouse who married in — gets their own "↑ Parents" button once no ancestors are recorded for them; using it inserts a new generation above (or to the left, in left-right mode) and pushes everything else along, so the anchor point always stays the furthest-back generation anyone has entered. Each couple's "↓ Child" grows a new branch that becomes its own little family tree once that child finds a spouse of their own. Any branch with children can be folded with "▾ fold branch" — it collapses to a "▸ N more" chip you can tap to reopen, which keeps a big tree manageable. The layout toggle and fold state are personal to you; they don't change what anyone else sees. Hit "↻ Refresh" if you think someone else has added to it recently.</footer>
+</div>
+
+<script>
+// This app was originally built as a Claude.ai artifact, which provides a
+// built-in `window.storage` API. A real deployed website doesn't have that,
+// so this shim reimplements the exact same interface on top of:
+//   - fetch() + this server's tiny /api/shared/:key endpoint, for shared=true
+//   - localStorage, for shared=false (personal prefs — never leave the browser)
+// Nothing below this block needed to change as a result.
+window.storage = {
+  async get(key, shared) {
+    try {
+      if (shared) {
+        const res = await fetch('/api/shared/' + encodeURIComponent(key));
+        if (!res.ok) return null;
+        const data = await res.json();
+        return (data && data.value !== null && data.value !== undefined)
+          ? { key, value: data.value, shared: true }
+          : null;
+      } else {
+        const v = localStorage.getItem(key);
+        return v !== null ? { key, value: v, shared: false } : null;
+      }
+    } catch (e) {
+      console.error('storage.get failed', e);
+      return null;
+    }
+  },
+  async set(key, value, shared) {
+    try {
+      if (shared) {
+        const res = await fetch('/api/shared/' + encodeURIComponent(key), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value })
+        });
+        if (!res.ok) return null;
+        return { key, value, shared: true };
+      } else {
+        localStorage.setItem(key, value);
+        return { key, value, shared: false };
+      }
+    } catch (e) {
+      console.error('storage.set failed', e);
+      return null;
+    }
+  },
+  async delete(key, shared) {
+    try {
+      if (shared) {
+        const res = await fetch('/api/shared/' + encodeURIComponent(key), { method: 'DELETE' });
+        if (!res.ok) return null;
+        return { key, deleted: true, shared: true };
+      } else {
+        localStorage.removeItem(key);
+        return { key, deleted: true, shared: false };
+      }
+    } catch (e) {
+      console.error('storage.delete failed', e);
+      return null;
+    }
+  },
+  async list(prefix, shared) {
+    try {
+      if (shared) {
+        const res = await fetch('/api/shared?prefix=' + encodeURIComponent(prefix || ''));
+        if (!res.ok) return null;
+        const data = await res.json();
+        return { keys: data.keys || [], prefix, shared: true };
+      } else {
+        const keys = Object.keys(localStorage).filter(k => !prefix || k.startsWith(prefix));
+        return { keys, prefix, shared: false };
+      }
+    } catch (e) {
+      console.error('storage.list failed', e);
+      return null;
+    }
+  }
+};
+</script>
+<script>
+let people = {};
+let meId = null;
+let myName = '';
+let nextId = 1;
+let orientation = 'down'; // 'down' (top-down) or 'right' (left-to-right)
+let collapsed = new Set(); // person ids whose children are folded away
+
+function genId(){ return 'p' + (nextId++); }
+
+function seedDefault(){
+  people = {};
+  nextId = 1;
+  const gf = genId(), gm = genId();
+  people[gf] = {id:gf, name:'Great-Grandfather', sex:'M', totem:'', fatherId:null, motherId:null, spouseId:gm, order:0, addedBy:''};
+  people[gm] = {id:gm, name:'Great-Grandmother', sex:'F', totem:'', fatherId:null, motherId:null, spouseId:gf, order:0, addedBy:''};
+}
+
+async function loadData(){
+  // shared tree data — visible to everyone who opens this artifact
+  try{
+    const shared = await window.storage.get('family-tree-people', true);
+    if(shared && shared.value){
+      const parsed = JSON.parse(shared.value);
+      people = parsed.people || {};
+      nextId = parsed.nextId || 1;
+      if(Object.keys(people).length === 0) seedDefault();
+    } else {
+      // one-time migration from an earlier private version of this tree, if present
+      let migrated = false;
+      try{
+        const legacy = await window.storage.get('family-tree-data', false);
+        if(legacy && legacy.value){
+          const parsedLegacy = JSON.parse(legacy.value);
+          if(parsedLegacy.people && Object.keys(parsedLegacy.people).length){
+            people = parsedLegacy.people; nextId = parsedLegacy.nextId || 1; migrated = true;
+          }
+        }
+      } catch(e){ /* no legacy data, ignore */ }
+      if(!migrated) seedDefault();
+      await saveData();
+    }
+  } catch(e){
+    seedDefault();
+  }
+  // personal preferences — just for this device/person, never shared
+  try{
+    const mine = await window.storage.get('family-tree-my-prefs', false);
+    if(mine && mine.value){
+      const p = JSON.parse(mine.value);
+      meId = p.meId || null;
+      myName = p.myName || '';
+      orientation = p.orientation === 'right' ? 'right' : 'down';
+      collapsed = new Set(Array.isArray(p.collapsed) ? p.collapsed : []);
+    }
+  } catch(e){ /* no personal prefs yet */ }
+  render();
+}
+
+async function saveData(){
+  try{
+    await window.storage.set('family-tree-people', JSON.stringify({people, nextId}), true);
+  } catch(e){ console.error('Save failed', e); }
+}
+
+async function saveMyPrefs(){
+  try{
+    await window.storage.set('family-tree-my-prefs', JSON.stringify({meId, myName, orientation, collapsed: Array.from(collapsed)}), false);
+  } catch(e){ console.error('Pref save failed', e); }
+}
+
+function childrenOf(idA, idB){
+  return Object.values(people)
+    .filter(p => (p.fatherId && (p.fatherId === idA || p.fatherId === idB)) ||
+                 (p.motherId && (p.motherId === idA || p.motherId === idB)))
+    .sort((a,b) => a.order - b.order);
+}
+
+function getRootIds(){
+  const roots = []; const claimedSpouse = new Set();
+  const all = Object.values(people).filter(p => !p.fatherId && !p.motherId);
+  for(const p of all){
+    if(claimedSpouse.has(p.id)) continue;
+    const spouse = p.spouseId ? people[p.spouseId] : null;
+    if(spouse && (spouse.fatherId || spouse.motherId)) continue;
+    roots.push(p.id);
+    if(spouse) claimedSpouse.add(spouse.id);
+  }
+  return roots;
+}
+
+function countDescendants(personId){
+  const p = people[personId];
+  if(!p) return 0;
+  const kids = childrenOf(personId, p.spouseId);
+  let count = kids.length;
+  kids.forEach(k => { count += countDescendants(k.id); });
+  return count;
+}
+
+/* ---------- relationship engine ---------- */
+
+function ancestorMap(startId){
+  const map = new Map();
+  function rec(id, dist, path){
+    if(map.has(id) && map.get(id).dist <= dist) return;
+    map.set(id, {dist, path});
+    const p = people[id]; if(!p) return;
+    if(p.fatherId) rec(p.fatherId, dist+1, [...path, p.fatherId]);
+    if(p.motherId) rec(p.motherId, dist+1, [...path, p.motherId]);
+  }
+  rec(startId, 0, [startId]);
+  return map;
+}
+
+function isFatherLineLink(fromId, toId){
+  // true if walking fromId -> father -> father ... reaches toId (toId is a patrilineal ancestor of/equal to fromId)
+  let cur = fromId; let guard = 0;
+  while(cur && guard++ < 40){
+    if(cur === toId) return true;
+    const p = people[cur]; if(!p || !p.fatherId) return false;
+    cur = p.fatherId;
+  }
+  return false;
+}
+
+function patriline(id){
+  const chain = []; let cur = id; let guard = 0;
+  while(cur && guard++ < 40){ chain.push(cur); const p = people[cur]; if(!p||!p.fatherId) break; cur = p.fatherId; }
+  return chain;
+}
+
+function ruleA_sekuruLine(egoId, targetId){
+  const ego = people[egoId];
+  if(!ego.motherId) return false;
+  const mother = people[ego.motherId];
+  if(!mother || !mother.fatherId) return false;
+  const MF = mother.fatherId;
+  if(targetId === MF) return true;
+  if(isFatherLineLink(targetId, MF)) return true; // target is son/grandson.. of MF
+  if(isFatherLineLink(MF, targetId)) return true; // target is father/grandfather of MF
+  return false;
+}
+
+function ruleB_muzukuruLine(egoId, targetId){
+  const chain = patriline(egoId); // [ego, father, father's father, ...]
+  for(const P of chain){
+    const kids = Object.values(people).filter(x => x.fatherId === P);
+    for(const k of kids){
+      if(k.sex !== 'F') continue;
+      if(k.id === targetId) return true;
+      if(isFatherLineLink(targetId, k.id)) return true; // target is her son/grandson...
+    }
+  }
+  return false;
+}
+
+function relate(egoId, targetId){
+  if(!egoId || !targetId) return null;
+  if(egoId === targetId) return {term:'—', cat:'self'};
+
+  const ego = people[egoId], target = people[targetId];
+  const spouse = ego.spouseId === targetId;
+  if(spouse) return {term: target.sex==='M' ? 'Murume' : 'Mukadzi', cat:'spouse'};
+
+  // in-law: spouse's sibling
+  if(ego.spouseId){
+    const sp = people[ego.spouseId];
+    if(sp && sp.id !== target.id){
+      const sharesParent =
+        (sp.fatherId && (sp.fatherId === target.fatherId || sp.fatherId === target.motherId)) ||
+        (sp.motherId && (sp.motherId === target.fatherId || sp.motherId === target.motherId));
+      if(sharesParent) return {term: target.sex==='M' ? 'Tsano' : 'Muramu', cat:'in-law'};
+    }
+  }
+  // in-law: child's spouse
+  const myKids = Object.values(people).filter(p=>p.fatherId===egoId||p.motherId===egoId);
+  if(myKids.some(k=>k.spouseId===targetId)){
+    return {term: target.sex==='M' ? 'Mukuwasha' : 'Muroora', cat:'in-law'};
+  }
+  // in-law: spouse's parent
+  if(ego.spouseId){
+    const sp = people[ego.spouseId];
+    if(sp && (sp.fatherId===targetId || sp.motherId===targetId)){
+      return {term: target.sex==='M' ? 'Tezvara' : 'Ambuya', cat:'in-law'};
+    }
+  }
+
+  const egoAnc = ancestorMap(egoId);
+  const tgtAnc = ancestorMap(targetId);
+  let ncaId=null, best=Infinity;
+  for(const [id, info] of egoAnc){
+    if(tgtAnc.has(id)){
+      const total = info.dist + tgtAnc.get(id).dist;
+      if(total < best){ best = total; ncaId = id; }
+    }
+  }
+  if(ncaId===null) return {term:'Hukama husiri hweropa', cat:'unrelated'}; // no blood link found
+
+  const U = egoAnc.get(ncaId).dist;
+  const D = tgtAnc.get(ncaId).dist;
+  const egoPath = egoAnc.get(ncaId).path; // [ego,...,nca]
+  const tgtPath = tgtAnc.get(ncaId).path; // [target,...,nca]
+  const branchEgo = U>=1 ? egoPath[egoPath.length-2] : null;
+  const branchTgt = D>=1 ? tgtPath[tgtPath.length-2] : null;
+
+  if(U===0 && D===0) return {term:'—', cat:'self'};
+  if(U===0){ // target is ego's own descendant
+    if(D===1) return {term: target.sex==='M' ? 'Mwanakomana' : 'Mwanasikana', cat:'child'};
+    return {term:'Muzukuru', cat:'descendant'};
+  }
+  if(D===0){ // target is ego's own ancestor
+    if(U===1) return {term: target.sex==='M' ? 'Baba' : 'Amai', cat:'parent'};
+    return {term: target.sex==='M' ? 'Sekuru' : 'Ambuya', cat:'ancestor'};
+  }
+
+  if(U===1 && D===1){ // full/half sibling
+    if(ego.sex === target.sex){
+      return {term: target.order < ego.order ? 'Mukoma' : "Munin'ina", cat:'sibling'};
+    }
+    return {term:'Hanzvadzi', cat:'sibling'};
+  }
+  if(U===1 && D===2){ // sibling's child
+    return {term:'Muzukuru', cat:'niece/nephew'};
+  }
+  if(U===2 && D===1){ // parent's sibling
+    const parentSex = people[branchEgo].sex;
+    if(parentSex==='M'){
+      if(target.sex==='M') return {term: target.order < branchEgo.order ? 'Babamukuru' : 'Babamunini', cat:"father's sibling"};
+      return {term:'Tete', cat:"father's sister"};
+    } else {
+      if(target.sex==='F') return {term: target.order < branchEgo.order ? 'Amaiguru' : 'Amainini', cat:"mother's sibling"};
+      return {term:'Sekuru', cat:"mother's brother"};
+    }
+  }
+  if(U===2 && D===2){ // first cousins
+    const sexEgoSide = people[branchEgo].sex;
+    const sexTgtSide = people[branchTgt].sex;
+    if(sexEgoSide === sexTgtSide){ // parallel cousin -> sibling
+      const elderLine = people[branchTgt].order < people[branchEgo].order;
+      if(ego.sex === target.sex) return {term: elderLine ? 'Mukoma' : "Munin'ina", cat:'parallel cousin (sibling)'};
+      return {term:'Hanzvadzi', cat:'parallel cousin (sibling)'};
+    } else { // cross cousin -> skewed term
+      if(sexEgoSide==='M') return {term:'Muzukuru', cat:"cross-cousin (father's sister's line)"};
+      return {term:'Sekuru', cat:"cross-cousin (mother's brother's line)"};
+    }
+  }
+
+  // deeper extensions
+  if(target.sex==='M' && ruleA_sekuruLine(egoId, targetId)) return {term:'Sekuru', cat:"mother's brother's line (skewed)", skew:true};
+  if(ruleB_muzukuruLine(egoId, targetId)) return {term:'Muzukuru', cat:"father's sister's line (skewed)", skew:true};
+
+  if(D===1 && U>=3){
+    return {term: target.sex==='M' ? 'Sekuru' : 'Ambuya', cat:'elder relative'};
+  }
+  if(D>=2 && U>=1){
+    return {term:'Muzukuru', cat:'extended junior relative'};
+  }
+  return {term:'Hukama hwakati wandei', cat:'extended relative — customary term varies'};
+}
+
+/* ---------- rendering ---------- */
+
+function els(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstChild; }
+
+function personCard(p){
+  const isMe = meId === p.id;
+  let rel = null;
+  if(meId && meId !== p.id) rel = relate(meId, p.id);
+  const card = els(`<div class="card ${isMe?'is-me':''}"></div>`);
+
+  card.appendChild(els(`<div class="field-label">Name</div>`));
+  const nameInput = els(`<input class="name" type="text" value="${escapeAttr(p.name)}" placeholder="Zita / Name">`);
+  nameInput.addEventListener('change', e=>{ p.name = e.target.value; saveData(); });
+  card.appendChild(nameInput);
+
+  const sexRow = els(`<div class="sexrow"></div>`);
+  const sexSel = els(`<select class="sex"><option value="M">he / him</option><option value="F">she / her</option></select>`);
+  sexSel.value = p.sex;
+  sexSel.addEventListener('change', e=>{ p.sex = e.target.value; saveData(); render(); });
+  sexRow.appendChild(sexSel);
+  card.appendChild(sexRow);
+
+  card.appendChild(els(`<div class="field-label">Totem / Mutupo</div>`));
+  const totemInput = els(`<input class="totem" type="text" value="${escapeAttr(p.totem||'')}" placeholder="e.g. Shumba, Moyo, Soko...">`);
+  totemInput.addEventListener('change', e=>{ p.totem = e.target.value; saveData(); });
+  card.appendChild(totemInput);
+
+  if(isMe){
+    card.appendChild(els(`<span class="term-tag me">★ This is me</span>`));
+  } else {
+    card.appendChild(els(`<div class="field-label">Relationship (to you)</div>`));
+    if(rel){
+      const tagClass = rel.skew ? 'term-tag skew' : 'term-tag';
+      const tag = els(`<span class="${tagClass}">${rel.term}<span class="cat">${rel.cat}</span></span>`);
+      card.appendChild(tag);
+      const setMe = els(`<button class="mini-btn" style="margin-top:4px;">view from here instead</button>`);
+      setMe.addEventListener('click', ()=>{ meId = p.id; saveMyPrefs(); render(); });
+      card.appendChild(setMe);
+    } else {
+      const btn = els(`<button class="mini-btn">Set as me</button>`);
+      btn.addEventListener('click', ()=>{ meId = p.id; saveMyPrefs(); render(); });
+      card.appendChild(btn);
+    }
+  }
+
+  // birth-order arrows, only meaningful among siblings sharing a parent
+  const sibs = Object.values(people).filter(x => (x.fatherId===p.fatherId && p.fatherId) || (x.motherId===p.motherId && p.motherId));
+  if(sibs.length > 1){
+    const ob = els(`<div class="order-btns"></div>`);
+    const up = els(`<button title="Mark older">▲</button>`);
+    const down = els(`<button title="Mark younger">▼</button>`);
+    up.addEventListener('click', ()=>{ p.order -= 1.5; saveData(); render(); });
+    down.addEventListener('click', ()=>{ p.order += 1.5; saveData(); render(); });
+    ob.appendChild(up); ob.appendChild(down);
+    card.style.position='relative';
+    card.appendChild(ob);
+  }
+
+  if(p.addedBy){
+    card.appendChild(els(`<div class="addedby">added by ${escapeAttr(p.addedBy)}</div>`));
+  }
+
+  if(!p.fatherId && !p.motherId){
+    const ancWrap = els(`<div class="card-extra"></div>`);
+    const addAnc = els(`<button class="mini-btn sprout-btn">↑ Parents</button>`);
+    addAnc.addEventListener('click', ()=> showForm(ancWrap, 'ancestors', p.id));
+    ancWrap.appendChild(addAnc);
+    card.appendChild(ancWrap);
+  }
+
+  return card;
+}
+
+function actionRow(personA, personB){
+  const wrap = els(`<div class="mini-actions"></div>`);
+  const kidCount = childrenOf(personA.id, personB?personB.id:null).length;
+
+  const addChildBtn = els(`<button class="mini-btn ${kidCount===0?'sprout-btn':''}">↓ Child${kidCount===0?' ✦':''}</button>`);
+  addChildBtn.addEventListener('click', ()=> showForm(wrap, 'child', personA.id, personB?personB.id:null));
+  wrap.appendChild(addChildBtn);
+
+  if(!personB){
+    const addSpouseBtn = els(`<button class="mini-btn">⚭ Spouse</button>`);
+    addSpouseBtn.addEventListener('click', ()=> showForm(wrap, 'spouse', personA.id));
+    wrap.appendChild(addSpouseBtn);
+  }
+
+  return wrap;
+}
+
+function showForm(anchorWrap, type, idA, idB){
+  const old = anchorWrap.parentElement.querySelector('.inline-form');
+  if(old) old.remove();
+
+  let form;
+  if(type==='child'){
+    form = els(`
+      <div class="inline-form">
+        <input type="text" placeholder="Child's name" class="cname">
+        <div class="row">
+          <select class="csex"><option value="M">Son</option><option value="F">Daughter</option></select>
+        </div>
+        <div class="actions"><button class="cancel">Cancel</button><button class="go">Add child</button></div>
+      </div>`);
+    form.querySelector('.cancel').addEventListener('click', ()=>form.remove());
+    form.querySelector('.go').addEventListener('click', ()=>{
+      const name = form.querySelector('.cname').value.trim() || 'New child';
+      const sex = form.querySelector('.csex').value;
+      const order = childrenOf(idA, idB).length;
+      const id = genId();
+      people[id] = {id, name, sex, totem:'', fatherId: sexParent(idA,idB,'M'), motherId: sexParent(idA,idB,'F'), spouseId:null, order, addedBy: myName};
+      saveData(); render();
+    });
+  } else if(type==='spouse'){
+    form = els(`
+      <div class="inline-form">
+        <input type="text" placeholder="Spouse's name" class="sname">
+        <div class="row">
+          <select class="ssex"><option value="F">Wife</option><option value="M">Husband</option></select>
+        </div>
+        <div class="actions"><button class="cancel">Cancel</button><button class="go">Add spouse</button></div>
+      </div>`);
+    form.querySelector('.cancel').addEventListener('click', ()=>form.remove());
+    form.querySelector('.go').addEventListener('click', ()=>{
+      const name = form.querySelector('.sname').value.trim() || 'New spouse';
+      const sex = form.querySelector('.ssex').value;
+      const id = genId();
+      people[id] = {id, name, sex, totem:'', fatherId:null, motherId:null, spouseId: idA, order:0, addedBy: myName};
+      people[idA].spouseId = id;
+      saveData(); render();
+    });
+  } else if(type==='ancestors'){
+    form = els(`
+      <div class="inline-form">
+        <input type="text" placeholder="Father's name" class="fname">
+        <input type="text" placeholder="Mother's name" class="mname">
+        <div class="actions"><button class="cancel">Cancel</button><button class="go">Add parents</button></div>
+      </div>`);
+    form.querySelector('.cancel').addEventListener('click', ()=>form.remove());
+    form.querySelector('.go').addEventListener('click', ()=>{
+      const fname = form.querySelector('.fname').value.trim() || 'Father';
+      const mname = form.querySelector('.mname').value.trim() || 'Mother';
+      const fid = genId(), mid = genId();
+      people[fid] = {id:fid, name:fname, sex:'M', totem:'', fatherId:null, motherId:null, spouseId:mid, order:0, addedBy: myName};
+      people[mid] = {id:mid, name:mname, sex:'F', totem:'', fatherId:null, motherId:null, spouseId:fid, order:0, addedBy: myName};
+      people[idA].fatherId = fid; people[idA].motherId = mid;
+      saveData(); render();
+    });
+  }
+  anchorWrap.parentElement.appendChild(form);
+}
+
+function sexParent(idA, idB, sex){
+  if(people[idA] && people[idA].sex===sex) return idA;
+  if(idB && people[idB] && people[idB].sex===sex) return idB;
+  return null;
+}
+
+function escapeAttr(s){ return String(s).replace(/"/g,'&quot;'); }
+
+let pendingConnectors = [];
+
+function renderUnit(personId){
+  const p = people[personId];
+  const spouse = p.spouseId ? people[p.spouseId] : null;
+  const node = els(`<div class="node"></div>`);
+  const unit = els(`<div class="unit"></div>`);
+  const coupleRow = els(`<div class="couple-row"></div>`);
+  coupleRow.appendChild(personCard(p));
+  if(spouse){
+    coupleRow.appendChild(els(`<span class="knot">⚭</span>`));
+    coupleRow.appendChild(personCard(spouse));
+  }
+  unit.appendChild(coupleRow);
+  unit.appendChild(actionRow(p, spouse));
+
+  const kids = childrenOf(p.id, spouse?spouse.id:null);
+  if(kids.length){
+    const isFolded = collapsed.has(p.id);
+    const foldBtn = els(`<button class="mini-btn fold-btn">${isFolded ? '▸ '+countDescendants(p.id)+' more' : '▾ fold branch'}</button>`);
+    foldBtn.addEventListener('click', ()=>{
+      if(isFolded) collapsed.delete(p.id); else collapsed.add(p.id);
+      saveMyPrefs(); render();
+    });
+    unit.appendChild(foldBtn);
+  }
+  node.appendChild(unit);
+
+  if(kids.length && !collapsed.has(p.id)){
+    const childrenRow = els(`<div class="children-row"></div>`);
+    const childUnitEls = [];
+    kids.forEach(k => {
+      const slot = els(`<div class="child-slot"></div>`);
+      const kidNode = renderUnit(k.id);
+      slot.appendChild(kidNode);
+      childrenRow.appendChild(slot);
+      childUnitEls.push(kidNode.firstElementChild); // that child's own .unit, always appended first
+    });
+    node.appendChild(childrenRow);
+    pendingConnectors.push({parent: unit, children: childUnitEls});
+  }
+  return node;
+}
+
+function drawConnectors(list){
+  const forestEl = document.getElementById('forest');
+  if(!forestEl) return;
+  const old = document.getElementById('connectorSvg');
+  if(old) old.remove();
+  if(!list.length) return;
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.id = 'connectorSvg';
+  svg.style.position = 'absolute';
+  svg.style.left = '0'; svg.style.top = '0';
+  svg.style.pointerEvents = 'none';
+  svg.style.zIndex = '0';
+  const width = Math.max(forestEl.scrollWidth, forestEl.clientWidth, 1);
+  const height = Math.max(forestEl.scrollHeight, forestEl.clientHeight, 1);
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  forestEl.style.position = 'relative';
+  forestEl.insertBefore(svg, forestEl.firstChild);
+
+  const fRect = forestEl.getBoundingClientRect();
+  const toLocal = (rect) => ({
+    cx: rect.left + rect.width/2 - fRect.left + forestEl.scrollLeft,
+    cy: rect.top + rect.height/2 - fRect.top + forestEl.scrollTop,
+    top: rect.top - fRect.top + forestEl.scrollTop,
+    bottom: rect.bottom - fRect.top + forestEl.scrollTop,
+    left: rect.left - fRect.left + forestEl.scrollLeft,
+    right: rect.right - fRect.left + forestEl.scrollLeft
+  });
+  const line = (x1,y1,x2,y2) => {
+    const el = document.createElementNS(svgNS,'line');
+    el.setAttribute('x1',x1); el.setAttribute('y1',y1);
+    el.setAttribute('x2',x2); el.setAttribute('y2',y2);
+    svg.appendChild(el);
+  };
+  const stemLen = 16;
+
+  list.forEach(({parent, children}) => {
+    if(!parent || !children || !children.length) return;
+    const p = toLocal(parent.getBoundingClientRect());
+    const kids = children.filter(Boolean).map(c => toLocal(c.getBoundingClientRect()));
+    if(!kids.length) return;
+
+    if(orientation === 'right'){
+      const midX = p.right + stemLen;
+      line(p.right, p.cy, midX, p.cy);
+      const minY = Math.min(p.cy, ...kids.map(k=>k.cy));
+      const maxY = Math.max(p.cy, ...kids.map(k=>k.cy));
+      line(midX, minY, midX, maxY);
+      kids.forEach(k => line(midX, k.cy, k.left, k.cy));
+    } else {
+      const midY = p.bottom + stemLen;
+      line(p.cx, p.bottom, p.cx, midY);
+      const minX = Math.min(p.cx, ...kids.map(k=>k.cx));
+      const maxX = Math.max(p.cx, ...kids.map(k=>k.cx));
+      line(minX, midY, maxX, midY);
+      kids.forEach(k => line(k.cx, midY, k.cx, k.top));
+    }
+  });
+}
+
+function populateEgoSelect(){
+  const sel = document.getElementById('egoSelect');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— choose "you" —</option>';
+  Object.values(people)
+    .sort((a,b)=>a.name.localeCompare(b.name))
+    .forEach(p=>{
+      const opt = els(`<option value="${p.id}">${p.name || '(unnamed)'}</option>`);
+      sel.appendChild(opt);
+    });
+  sel.value = meId || '';
+}
+
+function render(){
+  const nameField = document.getElementById('contributorName');
+  if(document.activeElement !== nameField) nameField.value = myName || '';
+  const orientBtn = document.getElementById('orientBtn');
+  orientBtn.textContent = orientation === 'down' ? '⇅ Top-down' : '⇄ Left-right';
+  populateEgoSelect();
+  const forest = document.getElementById('forest');
+  forest.classList.toggle('ltr', orientation === 'right');
+  forest.innerHTML = '';
+  pendingConnectors = [];
+  const roots = getRootIds();
+  roots.forEach(rid=>{
+    forest.appendChild(renderUnit(rid));
+  });
+  requestAnimationFrame(()=> drawConnectors(pendingConnectors));
+}
+
+let resizeTimer = null;
+window.addEventListener('resize', ()=>{
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(()=> drawConnectors(pendingConnectors), 150);
+});
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(()=> drawConnectors(pendingConnectors));
+}
+
+document.getElementById('contributorName').addEventListener('change', e=>{
+  myName = e.target.value.trim(); saveMyPrefs();
+});
+document.getElementById('egoSelect').addEventListener('change', e=>{
+  meId = e.target.value || null;
+  saveMyPrefs(); render();
+});
+document.getElementById('refreshBtn').addEventListener('click', ()=>{ loadData(); });
+document.getElementById('orientBtn').addEventListener('click', ()=>{
+  orientation = orientation === 'down' ? 'right' : 'down';
+  document.getElementById('orientBtn').textContent = orientation === 'down' ? '⇅ Top-down' : '⇄ Left-right';
+  saveMyPrefs(); render();
+});
+document.getElementById('newBranchBtn').addEventListener('click', ()=>{
+  const fid = genId(), mid = genId();
+  people[fid] = {id:fid, name:'New ancestor', sex:'M', totem:'', fatherId:null, motherId:null, spouseId:mid, order:0, addedBy: myName};
+  people[mid] = {id:mid, name:'New ancestor', sex:'F', totem:'', fatherId:null, motherId:null, spouseId:fid, order:0, addedBy: myName};
+  saveData(); render();
+});
+document.getElementById('toggleLegend').addEventListener('click', ()=>{
+  document.getElementById('legend').classList.toggle('open');
+});
+document.getElementById('resetBtn').addEventListener('click', ()=>{
+  document.getElementById('confirmBar').style.display = 'flex';
+});
+document.getElementById('confirmNo').addEventListener('click', ()=>{
+  document.getElementById('confirmBar').style.display = 'none';
+});
+document.getElementById('confirmYes').addEventListener('click', ()=>{
+  seedDefault(); meId = null; saveData(); saveMyPrefs(); render();
+  document.getElementById('confirmBar').style.display = 'none';
+});
+
+loadData();
+</script>
+</body>
+</html>
