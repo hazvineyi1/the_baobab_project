@@ -121,10 +121,43 @@ function noteFailure(addr) {
 const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
-function page({ message = '', status = 200, notice = '' } = {}) {
+/* What a link to this project looks like when it is shared.
+ 
+   This lives on the GATE page, which is a thing worth understanding rather
+   than working around: everything else is behind the passphrase, so the page
+   a crawler actually fetches — WhatsApp, Facebook, Slack, iMessage — is this
+   one. Put the tags only on the app and every shared link previews as nothing.
+ 
+   It says what the project is and shows the baobab. It says nothing about any
+   family, and it cannot: the same card is served to everybody, before anyone
+   has proved they belong here. A preview that named the family would be a
+   preview rendered on somebody else's servers and shown in a group chat. */
+function preview(origin) {
+  const title = 'The Baobab Project';
+  const desc  = 'A Shona family tree. Mitupo, kinship, and the ancestors we share.';
+  const img   = (origin || '') + '/preview.jpg';
+  return `
+<meta name="description" content="${esc(desc)}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="${esc(title)}">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(desc)}">
+<meta property="og:image" content="${esc(img)}">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A baobab in brass, its roots running down into the soil">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(title)}">
+<meta name="twitter:description" content="${esc(desc)}">
+<meta name="twitter:image" content="${esc(img)}">
+<meta name="theme-color" content="#12100C">`;
+}
+
+function page({ message = '', status = 200, notice = '', origin = '' } = {}) {
   return { status, html: `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>The Baobab Project</title>
+<title>The Baobab Project</title>${preview(origin)}
 <style>
   :root{color-scheme:light dark;--sky:#F6F1E6;--ink:#221C13;--muted:#6E6555;
         --pod:#FFFDF7;--edge:#E3D9C6;--gold:#8A5A16;}
@@ -210,13 +243,27 @@ function gate({ passphrase, hasDatabase, log = console.log } = {}) {
     // look dead.
     if (req.path === '/health') return next();
 
+    // The link-preview card, and only it. When somebody shares a link to this
+    // project, the crawler that builds the preview has no passphrase — so an
+    // og:image behind the gate is an image the preview cannot show. This one
+    // file is generic artwork with no family data in it, which is why it can
+    // be let through and why nothing else here can.
+    if (req.method === 'GET' && req.path === '/preview.jpg') return next();
+
     const addr = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() ||
                  req.socket?.remoteAddress || 'unknown';
+
+    // og:image has to be absolute, and only the request knows what this
+    // deployment is called from outside. Behind Railway's proxy the scheme
+    // arrives in a header rather than on the socket.
+    const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
+                  (req.secure ? 'https' : 'http');
+    const origin = req.headers.host ? `${proto}://${req.headers.host}` : '';
 
     if (req.method === 'POST' && req.path === '/gate') {
       if (tooManyAttempts(addr)) {
         const p = page({ message: 'Too many attempts. Wait a few minutes and try again.',
-                         status: 429 });
+                         status: 429, origin });
         return res.status(p.status).type('html').send(p.html);
       }
       const given = normalise(req.body && req.body.passphrase);
@@ -234,14 +281,14 @@ function gate({ passphrase, hasDatabase, log = console.log } = {}) {
       noteFailure(addr);
       // The same words whether the passphrase was wrong or empty: a message
       // that distinguishes them is a message that helps somebody guess.
-      const p = page({ message: 'That passphrase was not recognised.', status: 401 });
+      const p = page({ message: 'That passphrase was not recognised.', status: 401, origin });
       return res.status(p.status).type('html').send(p.html);
     }
 
     if (valid(secret, readCookie(req.headers.cookie, COOKIE))) return next();
 
     if (req.path === '/gate' && req.method === 'GET') {
-      const p = page();
+      const p = page({ origin });
       return res.status(p.status).type('html').send(p.html);
     }
 
@@ -254,7 +301,7 @@ function gate({ passphrase, hasDatabase, log = console.log } = {}) {
       });
     }
 
-    const p = page({ status: 401 });
+    const p = page({ status: 401, origin });
     return res.status(p.status).type('html').send(p.html);
   };
 }

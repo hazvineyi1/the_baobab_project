@@ -24,6 +24,9 @@ function appWith(opts) {
   app.get('/health', (req, res) => res.send('ok'));
   app.get('/api/tree/x/tree', (req, res) => res.json({ secret: 'the family' }));
   app.get('/', (req, res) => res.send('<h1>the tree</h1>'));
+  app.get('/preview.jpg', (req, res) => res.type('jpeg').send(Buffer.from([0xff, 0xd8])));
+  app.get('/baobab.webp', (req, res) => res.send('webp'));
+  app.get('/anything.js', (req, res) => res.send('js'));
   return app;
 }
 
@@ -151,6 +154,38 @@ const cookieFrom = res => {
   const blocked = await req(brute, { method:'POST', path:'/gate', body:{ passphrase: PASS } });
   eq('and the correct passphrase is refused while cooling off', blocked.status, 429);
   brute.close();
+
+  section('a shared link previews, without a passphrase');
+  // Everything is behind the gate, so the page a link crawler actually
+  // fetches — WhatsApp, Facebook, Slack, iMessage — is the gate page. Tags
+  // only on the app would mean every shared link previewing as nothing.
+  const crawl = await req(guarded, { path: '/' });
+  eq('the crawler still gets a 401', crawl.status, 401);
+  check('but with a title',       /<meta property="og:title"/.test(crawl.text));
+  check('a description',          /og:description/.test(crawl.text));
+  check('a card image',           /og:image/.test(crawl.text));
+  check('sized, so it renders as a wide card',
+        /og:image:width" content="1200"/.test(crawl.text));
+  check('and named as a large card', /summary_large_image/.test(crawl.text));
+
+  section('the preview says nothing about any family');
+  // The same card is served to everyone, before anyone has proved they belong
+  // here. A preview naming a family would be one rendered on somebody else's
+  // servers and shown in a group chat.
+  check('no family name', !/family:|treeId|tree_id/.test(crawl.text));
+  check('and no names at all beyond the project’s own',
+        (crawl.text.match(/content="[^"]*"/g) || [])
+          .every(m => !/\b(Moyo|Ncube|Sekuru|Mbuya)\b/.test(m)));
+
+  section('and the card image itself is reachable, or the preview has a hole');
+  const img = await req(guarded, { path: '/preview.jpg' });
+  eq('served without a passphrase', img.status, 200);
+
+  section('but letting the image through opened nothing else');
+  for (const path of ['/baobab.webp', '/index.html', '/api/tree/x/tree', '/anything.js']) {
+    const r2 = await req(guarded, { path });
+    check(`${path} is still closed`, r2.status === 401, `got ${r2.status}`);
+  }
 
   guarded.close();
 

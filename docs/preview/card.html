@@ -1,0 +1,49 @@
+<!doctype html><meta charset="utf-8">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{width:1200px;height:630px;overflow:hidden;background:#100E0A;
+       font-family:'Bitstream Charter',Charter,'DejaVu Serif',Georgia,serif;
+       position:relative}
+  .sky{position:absolute;inset:0;
+       background:radial-gradient(120% 95% at 76% 28%, #221C13 0%, #100E0A 66%)}
+  .ground{position:absolute;left:0;right:0;bottom:0;height:31%;
+          background:linear-gradient(#0E0A07,#060403)}
+  .horizon{position:absolute;left:0;right:0;bottom:31%;height:1px;
+           background:#4A3A26;opacity:.45}
+
+  /* Brass, arrived at by comparison rather than guesswork: the mask is white
+     on black, so screen drops the black and the filter carries what is left
+     to the same gold the rest of the project uses. */
+  .lim{position:absolute;mix-blend-mode:screen;
+       filter:brightness(.46) sepia(1) saturate(3.2) hue-rotate(2deg)}
+  .lim img{width:100%;display:block}
+  .crown{right:56px;bottom:31%;width:404px;opacity:.92}
+  /* A baobab is mostly roots, and this project puts ancestors below the
+     horizon — so the same tree again, inverted, going down into the soil. */
+  /* Flipped about its own centre, not its top edge: a top-origin flip
+     sends the roots back up over the crown instead of down into the soil. */
+  .roots{right:56px;top:69%;width:404px;opacity:.5;
+         transform:scaleY(-.72)}
+
+  /* The roots should run out of sight into the soil rather than be sliced off
+     by the edge of the card. */
+  .deep{position:absolute;left:0;right:0;bottom:0;height:20%;z-index:1;
+        background:linear-gradient(rgba(4,3,2,0),#040302 72%)}
+  .wrap{position:absolute;left:80px;top:0;bottom:0;width:590px;
+        display:flex;flex-direction:column;justify-content:center;z-index:2}
+  h1{font-size:76px;line-height:1.0;color:#F2ECDF;font-weight:700;letter-spacing:-.015em}
+  h1 em{font-style:normal;color:#D9A441}
+  p{margin-top:24px;font-size:25px;line-height:1.5;color:#ABA394;
+    font-family:'Liberation Sans','DejaVu Sans',sans-serif}
+  .rule{width:72px;height:3px;background:#D9A441;margin-top:30px;border-radius:2px;opacity:.9}
+</style>
+<div class="sky"></div>
+<div class="ground"></div><div class="horizon"></div>
+<div class="lim crown"><img src="baobab.webp"></div>
+<div class="lim roots"><img src="baobab.webp"></div>
+<div class="deep"></div>
+<div class="wrap">
+  <h1>The <em>Baobab</em><br>Project</h1>
+  <p>A Shona family tree. Mitupo, kinship,<br>and the ancestors we share.</p>
+  <div class="rule"></div>
+</div>

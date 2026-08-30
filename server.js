@@ -107,6 +107,13 @@ async function setupDatabase() {
       publicRouter.use(treeRoutes.publicRoutes(pool));
       console.log('Public record is ON — ancestors are readable without the passphrase.');
     } else {
+      // Say so, rather than letting the request fall through to the gate and
+      // then to the static files, where it comes back as a page of HTML that
+      // a client asking for JSON can only read as a mystery.
+      publicRouter.use((req, res) => res.status(404).json({
+        error: 'public_record_off',
+        message: 'This deployment is not publishing its records.'
+      }));
       console.log('Public record is off (set MW_PUBLIC_READ=on to publish ancestors).');
     }
 
@@ -267,6 +274,27 @@ app.get('/api/shared', async (req, res) => {
 app.get('/health', (req, res) => res.send('ok'));
 
 // ---- static frontend ----
+
+/* The page itself, with %ORIGIN% filled in.
+ 
+   og:image has to be an absolute URL, and a static file cannot know what this
+   deployment is called from outside — that only arrives on the request, and
+   behind Railway's proxy the scheme arrives in a header rather than on the
+   socket. Read once and cached; the substitution is per request because one
+   deployment can answer to more than one name. */
+let pageHtml = null;
+const INDEX = path.join(__dirname, 'public', 'index.html');
+
+app.get(['/', '/index.html'], (req, res, next) => {
+  try {
+    if (pageHtml === null) pageHtml = require('fs').readFileSync(INDEX, 'utf8');
+  } catch (e) { return next(); }      // fall through to static rather than 500
+  const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
+                (req.secure ? 'https' : 'http');
+  const origin = req.headers.host ? `${proto}://${req.headers.host}` : '';
+  res.type('html').send(pageHtml.split('%ORIGIN%').join(origin));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 setupDatabase()
