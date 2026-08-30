@@ -9,10 +9,28 @@ This is a small Node/Express app with one tiny API for the data everyone
 shares, and a static frontend that does all the actual tree logic in the
 browser.
 
+## Storage
+
+The tree lives in real Postgres tables — people, unions, partner links and
+child links, with the "one set of parents" rule enforced by a primary key
+rather than a hopeful check in JavaScript. See **[docs/ARCHITECTURE.md]
+(docs/ARCHITECTURE.md)** for the schema, the operations API, the concurrency
+model and the measured performance numbers.
+
+Two relatives editing at the same time both keep their work: writes are small
+named operations applied in one transaction, not a whole-tree overwrite.
+
+```bash
+npm start                             # applies schema migrations on boot
+node scripts/migrate-data.js          # inspect the old blob, write nothing
+node scripts/migrate-data.js --apply  # move it into the real tables
+npm test                              # 165 tests; needs TEST_DATABASE_URL
+```
+
 ## What "shared" means here
 
-There is **no login**. Anyone who has the URL can see and edit the whole
-tree. Personal settings — who you've picked as "you," which layout
+There is **no login** on the currently deployed site. Anyone who has the URL
+can see and edit the whole tree. Personal settings — who you've picked as "you," which layout
 orientation you prefer, which branches you've folded — stay in your own
 browser (`localStorage`) and are never sent to the server. Everything
 else (names, totems, relationships) is genuinely shared and public to
