@@ -8,6 +8,13 @@ that grows roots down into the soil and branches up into the canopy.
 The whole frontend is one self-contained file with no build step
 (`public/index.html`). The server is Node/Express over Postgres.
 
+## Credits
+
+`public/baobab.webp` — the baobab standing behind the family — is derived from
+a photograph supplied by the project owner, reduced to a greyscale alpha mask.
+Replacing it is one file drop; see **The backdrop** in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ## Storage
 
 The tree lives in real Postgres tables — people, unions, partner links and

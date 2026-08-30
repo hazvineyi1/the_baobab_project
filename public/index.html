@@ -113,13 +113,15 @@ body{
 .bg-photo{opacity:.13;}
 /* Fainter than the crown, never stronger. The depth-group opacity on top of
    this is what makes the roots arrive as the view descends. */
-.bg-photo-roots{opacity:.1;}
+.bg-photo-roots{opacity:.12;}
+/* Against a near-black sky the mid bark tone all but disappears, so the night
+   theme lifts both the colour and the weight. */
 @media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]) .bg-photo{opacity:.2;}
-  :root:not([data-theme="light"]) .bg-photo-roots{opacity:.16;}
+  :root:not([data-theme="light"]) .bg-photo{fill:var(--bark-lit); opacity:.3;}
+  :root:not([data-theme="light"]) .bg-photo-roots{fill:var(--bark); opacity:.26;}
 }
-:root[data-theme="dark"] .bg-photo{opacity:.2;}
-:root[data-theme="dark"] .bg-photo-roots{opacity:.16;}
+:root[data-theme="dark"] .bg-photo{fill:var(--bark-lit); opacity:.3;}
+:root[data-theme="dark"] .bg-photo-roots{fill:var(--bark); opacity:.26;}
 .bg-trunk{fill:url(#bgBark);}
 .bg-grain{fill:none; stroke:var(--bark-dark); stroke-linecap:round; opacity:.28;}
 /* Subordinate to the mass. Drawn at full strength the limbs became the only
@@ -1697,6 +1699,9 @@ function bgTrunkProfile(rnd, side, H, baseW, topW){
 }
 
 let bgRootGroups = [], bgDeepest = 1;
+// Height of the tree above the horizon, in the backdrop's own units. Zero
+// while the drawn tree is showing, which is what selects the scaling rule.
+let bgPhotoAbove = 0;
 
 /* ── a photograph, if one has been provided ─────────────────────────────
    Drop a baobab photograph into public/ as one of the names below and it
@@ -1718,8 +1723,15 @@ let bgRootGroups = [], bgDeepest = 1;
    Only use an image you hold the rights to. */
 const BG_PHOTO = {
   srcs: ['baobab.webp', 'baobab.jpg', 'baobab.jpeg', 'baobab.png'],
-  horizon: 0.86,      // fraction of the image height at which the ground sits
-  spread: 1.95,       // width as a multiple of the drawn tree's, for framing
+  // The shipped asset is cropped to the tree, so the foot of the trunk is the
+  // bottom edge. A raw photograph dropped in instead will be measured, or fall
+  // back to this.
+  horizon: 0.994,     // fraction of the image height at which the ground sits
+  // How much of the viewport's height the tree occupies above the horizon.
+  // Framing is derived from this and the image's own aspect ratio rather than
+  // from a guessed width, so any photograph lands correctly framed instead of
+  // needing to be dialled in by hand.
+  height: 0.56,
   // How hard the sky is cut away. Raise `cut` if the sky lingers as a haze;
   // lower it if fine branches are being eaten. `lift` sets how dark a pixel
   // has to be before it counts as tree at all.
@@ -1731,28 +1743,36 @@ const BG_PHOTO = {
    system torn out of the ground. So below the horizon the same photograph is
    mirrored — darker, softer, and revealed as the view descends. The roots the
    family travels down into are the tree's own branches, reflected. */
-function bgPhotoMarkup(src, w, h, horizon){
-  const W = Math.round(900 * BG_PHOTO.spread);
-  const H = Math.round(W * (h / w));
+function bgPhotoMarkup(src, w, h, horizon, needsInvert){
+  // Sized in the same units the drawn tree uses, from the image's own aspect
+  // ratio. placeBackdrop then scales by bgPhotoAbove so the part above the
+  // horizon comes out at BG_PHOTO.height of the viewport.
+  const H = 1000;
+  const W = Math.round(H * (w / h));
   const top = Math.round(-H * horizon);            // horizon lands on y = 0
   const x = Math.round(-W / 2);
   const above = -top;                              // height of the sky portion
+  bgPhotoAbove = above;
 
-  // The photograph is used as a MASK, not pasted in. Drawn directly it brings
-  // its own sky and its own ground with it, and you get a rectangle of someone
-  // else's weather sitting over the page. Inverted, its darkness becomes the
-  // alpha: the tree is opaque, the sky falls away to nothing, and what shows
-  // through is a flat fill in the app's own bark colour. Photographic detail,
-  // the palette's colour, no rectangle, and it works on either theme.
-  const sil =
-    `<filter id="bgSil" color-interpolation-filters="sRGB">` +
-      `<feColorMatrix type="saturate" values="0"/>` +
-      `<feComponentTransfer>` +
-        `<feFuncR type="linear" slope="${-BG_PHOTO.cut}" intercept="${BG_PHOTO.lift}"/>` +
-        `<feFuncG type="linear" slope="${-BG_PHOTO.cut}" intercept="${BG_PHOTO.lift}"/>` +
-        `<feFuncB type="linear" slope="${-BG_PHOTO.cut}" intercept="${BG_PHOTO.lift}"/>` +
-      `</feComponentTransfer>` +
-    `</filter>`;
+  // The image is a MASK, never pasted in. Its brightness becomes the alpha and
+  // what shows through is a flat fill in the app's own bark colour. That keeps
+  // the photograph's detail — which is all of what makes it look photographed —
+  // while the colour comes from the palette, so one file serves both the day
+  // and the night theme instead of a brown tree fighting a midnight sky.
+  //
+  // A photograph arrives the wrong way round for this (dark tree, bright sky)
+  // and is inverted first. A prepared mask is already white-on-black and is
+  // passed through untouched, which also skips the filter entirely.
+  const sil = needsInvert
+    ? `<filter id="bgSil" color-interpolation-filters="sRGB">` +
+        `<feColorMatrix type="saturate" values="0"/>` +
+        `<feComponentTransfer>` +
+          `<feFuncR type="linear" slope="${-BG_PHOTO.cut}" intercept="${BG_PHOTO.lift}"/>` +
+          `<feFuncG type="linear" slope="${-BG_PHOTO.cut}" intercept="${BG_PHOTO.lift}"/>` +
+          `<feFuncB type="linear" slope="${-BG_PHOTO.cut}" intercept="${BG_PHOTO.lift}"/>` +
+        `</feComponentTransfer>` +
+      `</filter>`
+    : '';
 
   // Masked to the sky portion only, so the ground in the photograph is never
   // drawn and the app's horizon is the only one in the picture.
@@ -1760,7 +1780,7 @@ function bgPhotoMarkup(src, w, h, horizon){
     `<mask id="bgSilMask" maskUnits="userSpaceOnUse" ` +
       `x="${x}" y="${top}" width="${W}" height="${above}">` +
       `<image href="${src}" x="${x}" y="${top}" width="${W}" height="${H}" ` +
-        `preserveAspectRatio="xMidYMid slice" filter="url(#bgSil)"/>` +
+        `preserveAspectRatio="xMidYMid meet"${needsInvert ? ' filter="url(#bgSil)"' : ''}/>` +
     `</mask>`;
 
   // The mirrored half has to dissolve into the soil. Left alone the masked
@@ -1784,12 +1804,28 @@ function bgPhotoMarkup(src, w, h, horizon){
     `<rect class="${cls}" x="${x}" y="${top}" width="${W}" height="${above}" ` +
     `fill="${fill}" mask="url(#bgSilMask)"/>`;
 
-  return `<defs>${sil}${mask}${fade}</defs>` +
-    panel('bg-photo', 'var(--bark)') +
-    // Mirrored about the horizon: the crown becomes the root system.
-    `<g class="bg-roots" data-depth="0" transform="scale(1,-1)">` +
+  // Mirrored about the horizon: the crown becomes the root system. But a
+  // single reflection is only as deep as the crown is tall, and then the
+  // ground is simply empty — travelling further back through the ancestors
+  // would be rewarded with nothing, which is the whole point failing at the
+  // moment it should pay off.
+  //
+  // So the reflection is layered. Each copy reaches further down and draws in
+  // narrower, the way a root system tapers as it goes; each is tagged with a
+  // depth, and the existing descent fade brings them in one after another. The
+  // roots the family travels down into keep going for as long as there is
+  // family to travel through.
+  const layers = [
+    { y: 1.00, x: 1.00 },
+    { y: 1.95, x: 0.84 },
+    { y: 3.40, x: 0.66 }
+  ].map((L, i) =>
+    `<g class="bg-roots" data-depth="${i}" transform="scale(${L.x},${-L.y})">` +
       `<g mask="url(#bgFade)">${panel('bg-photo bg-photo-roots', 'var(--root)')}</g>` +
-    `</g>`;
+    `</g>`).join('');
+
+  return `<defs>${sil}${mask}${fade}</defs>` +
+    panel('bg-photo', 'var(--bark)') + layers;
 }
 
 // Resolve the first name that actually exists. A missing photograph is not an
@@ -1801,7 +1837,7 @@ function bgFindPhoto(done){
     const src = BG_PHOTO.srcs[i++];
     const img = new Image();
     img.onload = () => done({ src, w: img.naturalWidth, h: img.naturalHeight,
-                              horizon: bgMeasureHorizon(img) });
+                              ...bgInspect(img) });
     img.onerror = tryNext;
     img.src = src;
   };
@@ -1824,7 +1860,7 @@ function bgFindPhoto(done){
    measured this way, so it falls back to the configured fraction. The console
    says which happened, because a backdrop sitting at the wrong height is
    otherwise a puzzling thing to debug. */
-function bgMeasureHorizon(img){
+function bgInspect(img){
   try {
     const N = 220;                                   // sampled small; this is a
     const c = document.createElement('canvas');      // measurement, not a render
@@ -1839,23 +1875,34 @@ function bgMeasureHorizon(img){
       return (px[i] * 0.2126 + px[i + 1] * 0.7152 + px[i + 2] * 0.0722) / 255;
     };
 
-    // The corners agree on the background colour in a cut-out, and disagree in
-    // a landscape.
     const corners = [lum(1, 1), lum(w - 2, 1), lum(1, h - 2), lum(w - 2, h - 2)];
     const bg = corners.reduce((a, b) => a + b, 0) / 4;
     const spread = Math.max(...corners) - Math.min(...corners);
-    if (spread > 0.16 || bg < 0.6) return null;      // not a cut-out
 
-    // Lowest row holding anything appreciably darker than the background.
+    // Two kinds of file end up here, and they need opposite treatment.
+    //
+    // A prepared MASK is the tree in white on black — it is already the alpha
+    // channel and is used exactly as it is. A PHOTOGRAPH is a dark tree on a
+    // bright sky, and has to be inverted before its darkness can serve as the
+    // alpha. Getting this backwards produces a page-filling rectangle with a
+    // tree-shaped hole in it, so it is worth deciding from the pixels rather
+    // than from the filename.
+    const needsInvert = bg > 0.5;
+    if (!needsInvert) return { needsInvert };        // a mask: horizon is configured
+
+    // A photograph with a clean uniform border is a cut-out, and the foot of
+    // the subject tells us where the ground is. One with content at every edge
+    // is a landscape and cannot be measured this way.
+    if (spread > 0.16) return { needsInvert };
     const cut = bg - 0.2;
     for (let y = h - 1; y >= 0; y--){
       let dark = 0;
       for (let x = 0; x < w; x++) if (lum(x, y) < cut) dark++;
-      if (dark > w * 0.006) return Math.min(0.995, (y + 1) / h);
+      if (dark > w * 0.006) return { needsInvert, horizon: Math.min(0.995, (y + 1) / h) };
     }
-    return null;
+    return { needsInvert };
   } catch (e) {
-    return null;                                     // never block on a measurement
+    return { needsInvert: true };                    // never block on a measurement
   }
 }
 
@@ -1870,10 +1917,11 @@ function buildBackdrop(){
     bgFindPhoto(found => {
       if (!found) return;
       const horizon = found.horizon || BG_PHOTO.horizon;
-      console.log(`Backdrop: ${found.src}, horizon ` +
-        (found.horizon ? `measured at ${(horizon * 100).toFixed(1)}% (cut-out detected)`
-                       : `assumed at ${(horizon * 100).toFixed(1)}% — set BG_PHOTO.horizon if the tree sits wrong`));
-      g.innerHTML = bgPhotoMarkup(found.src, found.w, found.h, horizon);
+      console.log(`Backdrop: ${found.src} — ` +
+        `${found.needsInvert ? 'photograph, inverting to a mask' : 'prepared mask, used as is'}, ` +
+        `horizon ${found.horizon ? `measured at ${(horizon * 100).toFixed(1)}%`
+                                 : `set to ${(horizon * 100).toFixed(1)}%`}`);
+      g.innerHTML = bgPhotoMarkup(found.src, found.w, found.h, horizon, found.needsInvert);
       g.classList.add('has-photo');
       bgRootGroups = Array.from(g.querySelectorAll('.bg-roots'))
         .map(el => ({ el, depth: Number(el.dataset.depth) }));
@@ -2000,8 +2048,13 @@ function placeBackdrop(){
   // tracks it exactly. Sideways it drifts at a fraction of the pan, and it
   // grows far more slowly than the family does on zoom, which is what puts it
   // at a distance rather than in the way.
-  const scale = Math.max(0.3, Math.min(1.5, (innerHeight * 0.86) / 900))
-              * (1 + (pos.k - 1) * 0.2);
+  // A photograph is framed to its own proportions; the drawn tree has a fixed
+  // size it was designed at. Either way it grows far more slowly than the
+  // family does on zoom, which is what keeps it at a distance.
+  const scale = (bgPhotoAbove
+      ? (innerHeight * BG_PHOTO.height) / bgPhotoAbove
+      : Math.max(0.3, Math.min(1.5, (innerHeight * 0.86) / 900)))
+    * (1 + (pos.k - 1) * 0.2);
   g.setAttribute('transform',
     `translate(${(innerWidth / 2 + pos.x * 0.12).toFixed(1)} ${pos.y.toFixed(1)}) ` +
     `scale(${scale.toFixed(3)})`);

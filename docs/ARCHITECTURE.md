@@ -215,3 +215,44 @@ looks in `$MW_HARNESS_DIR`, then `./harness/`, then `/tmp`, boots a server,
 passes the base URL and a Chromium path, and reports absent suites as
 **SKIPPED rather than passed**. A suite that reported nothing when its file was
 missing would turn an untested build green, which is worse than no suite.
+
+## The backdrop
+
+`public/baobab.webp` is the tree standing behind the family. If it is absent a
+generated one is drawn instead, so the app never depends on it.
+
+It is not a picture pasted onto the page. It is a **mask**: a greyscale image
+whose brightness becomes the alpha, with the colour coming from the palette.
+That matters for three reasons.
+
+- **One file, both themes.** A brown photograph looks wrong against the night
+  sky. A mask filled with `--bark` is correct in either.
+- **A quarter of the weight.** Alpha-only at 1100px is 155 KB where the same
+  tree in colour at 860px was 274 KB — smaller *and* sharper, because at 13%
+  opacity the colour contributes almost nothing and the branch shape carries
+  everything. The original upload was 4.2 MB; this is 28× smaller, which is
+  the difference between a page that opens on rural mobile data and one that
+  does not.
+- **No rectangle.** Drawn directly, a photograph brings its own sky and ground
+  and lands as a block of someone else's weather over the page.
+
+The loader inspects the image rather than trusting its filename: a prepared
+mask (light subject, dark ground) is used as it is, and a photograph (dark
+subject, bright sky) is inverted into one first. A photograph cut out on a
+plain background also has its horizon measured from the foot of the subject,
+so it plants itself on the ground line without anyone typing in a fraction.
+
+Below the horizon the same image is mirrored — a baobab is called the
+upside-down tree because its crown looks like a root system — in three layers,
+each reaching further down and drawing in narrower, revealed one after another
+as the view descends through the ancestors. One reflection would only be as
+deep as the crown is tall, and travelling further back would be rewarded with
+empty ground.
+
+### Replacing it
+
+Drop any baobab image into `public/` as `baobab.webp`, `.jpg` or `.png`. A
+tree cut out on a plain background works best; a dry-season one with bare
+branches reads far better than a canopy in full leaf, which at this opacity
+becomes an undifferentiated smudge. Only use an image you hold the rights to —
+this repository is public.
