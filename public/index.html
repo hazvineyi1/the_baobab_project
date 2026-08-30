@@ -320,6 +320,46 @@ body{
   text-transform:uppercase; color:var(--gold); white-space:nowrap;
 }
 #form .dupe[disabled]{opacity:.6; cursor:default; border-style:dashed;}
+#form .kinpair{display:flex; gap:10px; margin-bottom:4px;}
+#form .kinpair > div{flex:1; min-width:0;}
+#form .kinlist{margin:-4px 0 8px;}
+#form .kinlist button{
+  display:block; width:100%; text-align:left; cursor:pointer;
+  padding:6px 9px; margin-bottom:3px; border-radius:8px;
+  background:var(--pod-hi); border:1px solid var(--pod-edge); color:var(--ink);
+  font-family:'Fraunces',Georgia,serif; font-size:13px;
+}
+#form .kinlist button:hover{border-color:var(--gold);}
+#form .kinlist button small{
+  display:block; font-family:'Karla',sans-serif; font-size:10px;
+  color:var(--muted); margin-top:1px;
+}
+#form .relline.none{background:var(--pod-hi); color:var(--ink); border:1.5px dashed var(--pod-edge);}
+#form .relline.none b{color:var(--muted);}
+#form .covbar{
+  height:7px; border-radius:99px; background:var(--pod-hi);
+  border:1px solid var(--pod-edge); overflow:hidden; margin-bottom:6px;
+}
+#form .covbar i{display:block; height:100%; background:var(--leaf);}
+#form .covnote{margin:0 0 8px; font-size:11.5px; color:var(--muted); line-height:1.5;}
+#form .covnote b{color:var(--ink);}
+#form .gaps{margin-bottom:4px;}
+#form .gaprow{
+  display:flex; gap:10px; align-items:baseline; padding:6px 0;
+  border-top:1px solid var(--pod-edge); font-size:11.5px;
+}
+#form .gaprow b{color:var(--gold); font-size:14px; min-width:34px; font-variant-numeric:tabular-nums;}
+#form .gaprow span{color:var(--ink); line-height:1.45;}
+#form .gaprow em{display:block; font-style:normal; color:var(--muted); font-size:10.5px;}
+#form .askrow{
+  display:flex; align-items:center; gap:8px; width:100%; cursor:pointer;
+  padding:7px 10px; margin-bottom:5px; border-radius:10px;
+  background:var(--pod-hi); border:1px solid var(--pod-edge); color:var(--ink); text-align:left;
+}
+#form .askrow:hover{border-color:var(--gold);}
+#form .askrow u{flex:1; text-decoration:none; font-family:'Fraunces',Georgia,serif; font-size:13.5px;}
+#form .askrow u small{display:block; font-family:'Karla',sans-serif; font-size:10px; color:var(--muted);}
+#form .askrow em{font-style:normal; font-size:10.5px; font-weight:700; color:var(--gold); white-space:nowrap;}
 #form .warn{
   margin:0 0 10px; padding:8px 11px; border-radius:10px;
   background:rgba(156,97,25,.1); border:1px solid var(--gold-soft);
@@ -423,7 +463,7 @@ body{
   padding:7px 13px; border-radius:999px; border:1.5px solid var(--pod-edge);
   color:var(--muted); font-weight:600; cursor:pointer; white-space:nowrap;
 }
-#bar #theme{font-variant-numeric:tabular-nums; min-width:74px; text-align:center;}
+#bar #theme{min-width:56px; text-align:center;}
 #bar #theme.set{border-color:var(--gold-soft); color:var(--gold);}
 #bar .who b{color:var(--leaf); font-weight:700;}
 #bar .who.active{background:var(--leaf); border-color:var(--leaf); color:var(--sky);}
@@ -497,8 +537,9 @@ body{
   <button id="fit">Fit</button>
   <button id="undo">Undo</button>
   <button id="clear">Clear</button>
-  <button class="who" id="theme" title="Day, night, or follow this device">◐ Auto</button>
+  <button class="who" id="theme" title="Day, night, or follow this device">Auto</button>
   <button class="who" id="who">You: <b>—</b></button>
+  <button class="who" id="kin">Kinship</button>
   <button class="dupes" id="dupes" hidden></button>
   <span class="tally"><b id="count">0</b> in the tree</span>
 </div>
@@ -876,8 +917,21 @@ function parentsOf(id){
 }
 
 /* Everybody above somebody, with how many generations up they sit, plus the
-   unions along the way — those are where two people's lines meet. */
+   unions along the way — those are where two people's lines meet.
+ 
+   Memoised. One relationship needs two of these walks, and the coverage scan
+   asks for thousands of relationships; without the cache it re-walks the tree
+   from scratch every time. Cleared whenever the tree changes, which is what
+   render() marks. */
+const ancestryCache = new Map();
 function ancestry(id){
+  const hit = ancestryCache.get(id);
+  if (hit) return hit;
+  const out = computeAncestry(id);
+  ancestryCache.set(id, out);
+  return out;
+}
+function computeAncestry(id){
   const up = new Map([[id, 0]]);
   const joins = [];                       // { union, child, up } — child is on this path
   let frontier = [{ id, up:0 }];
@@ -1332,6 +1386,7 @@ function branchPath(l){
 }
 
 function render(){
+  ancestryCache.clear();          // the tree may have changed shape
   computeLayout();
 
   const svg = [];
@@ -1744,7 +1799,7 @@ const BG_PHOTO = {
   // from a distance flatten exactly that. Widening the image thickens the
   // trunk and broadens the crown together, which is the proportion the tree
   // has in life rather than the one a lens gives it.
-  fatten: 1.34,
+  fatten: 1.72,
   // How hard the sky is cut away. Raise `cut` if the sky lingers as a haze;
   // lower it if fine branches are being eaten. `lift` sets how dark a pixel
   // has to be before it counts as tree at all.
@@ -2150,6 +2205,119 @@ function openDuplicates(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
+/* The calculator panel. */
+let kinA = null, kinB = null;
+
+function kinName(id){
+  const p = state.people[id];
+  return p ? p.name : '';
+}
+
+function kinPicker(side, chosen){
+  const val = chosen ? esc(kinName(chosen)) : '';
+  return `<p class="lbl">${side === 'a' ? 'Person' : 'Seen by'}</p>` +
+    `<input id="kin${side.toUpperCase()}" class="fld kinpick" data-side="${side}" ` +
+      `value="${val}" placeholder="Type a name" autocomplete="off">` +
+    `<div class="kinlist" data-for="${side}"></div>`;
+}
+
+function kinVerdict(from, to){
+  if (!from || !to) return '';
+  if (from === to) return `<p class="relline"><b>—</b><span>the same person</span></p>`;
+  const r = relationship(from, to);
+  if (!r) return '';
+  const term = r.term || r.choice;
+  return `<p class="relline${term ? '' : ' none'}">` +
+    `<b>${esc(term || 'Not named')}</b>` +
+    `<span>${esc(kinName(to))} is ${esc(kinName(from))}'s ${term ? esc(term) : 'relative'} ` +
+    `— ${esc(r.why)}</span></p>`;
+}
+
+function openKinship(){
+  closeForm();
+  if (!kinA || !state.people[kinA]) kinA = meId || sel || state.rootId;
+  if (kinB && !state.people[kinB]) kinB = null;
+  pending = { kind: 'dupes', anchorId: kinA || state.rootId };
+
+  const cov = kinshipCoverage();
+  const pct = cov.checked ? Math.round(cov.named / cov.checked * 100) : 100;
+  const gapRow = (n, label, fix) => n
+    ? `<div class="gaprow"><b>${n}</b><span>${esc(label)}<em>${esc(fix)}</em></span></div>` : '';
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML =
+    `<p class="cap">What are they to each other?</p>` +
+    `<div class="kinpair">` +
+      `<div>${kinPicker('a', kinA)}</div>` +
+      `<div>${kinPicker('b', kinB)}</div>` +
+    `</div>` +
+    (kinA && kinB
+      // Both ways round, because the terms are not reciprocal: your mother's
+      // brother is Sekuru to you, and you are Muzukuru to him.
+      ? kinVerdict(kinA, kinB) + kinVerdict(kinB, kinA)
+      : `<p class="warn">Pick two people. Shona terms are not reciprocal, so ` +
+        `both directions are shown — your mother's brother is <b>Sekuru</b> to ` +
+        `you, and you are <b>Muzukuru</b> to him.</p>`) +
+
+    `<p class="lbl" style="margin-top:14px;">What this tree can name</p>` +
+    `<div class="covbar"><i style="width:${pct}%"></i></div>` +
+    `<p class="covnote"><b>${cov.named}</b> of ${cov.checked} relationships named ` +
+    `(${pct}%)${cov.sampled ? ` — sampled from ${cov.total.toLocaleString()} pairs` : ''}</p>` +
+
+    (cov.named === cov.checked
+      ? `<p class="covnote">Every pair in the tree has a name. Adding more people ` +
+        `is what will find the next gap.</p>`
+      : `<div class="gaps">` +
+        gapRow(cov.gaps.seniority.length, 'older or younger is undecided',
+               'both birth years are needed to choose Mukoma from Munin\u2019ina') +
+        gapRow(cov.gaps.sex.length, 'the term depends on he or she',
+               'record which, and the word follows') +
+        gapRow(cov.gaps.unlinked.length, 'no traced link between them',
+               'add the people in between') +
+        gapRow(cov.gaps.described.length, 'described rather than named',
+               'the family has no single word for these; the app will not invent one') +
+        `</div>`) +
+
+    (cov.asks.length
+      ? `<p class="lbl" style="margin-top:12px;">Ask about these next</p>` +
+        cov.asks.map(a =>
+          `<button type="button" class="askrow" data-ask="${a.id}">` +
+            `<u>${esc(kinName(a.id))}<small>${a.need === 'born' ? 'birth year' : 'he or she'} ` +
+            `unknown</small></u><em>${a.count} relationship${a.count === 1 ? '' : 's'}</em>` +
+          `</button>`).join('')
+      : '') +
+
+    `<div class="row" style="margin-top:12px;"><button class="btn" id="kNo">Done</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  // Name pickers: filter as you type, click to choose.
+  el.querySelectorAll('.kinpick').forEach(inp => {
+    const side = inp.dataset.side;
+    const list = el.querySelector(`.kinlist[data-for="${side}"]`);
+    const show = () => {
+      const q = inp.value.trim().toLowerCase();
+      const hits = people()
+        .filter(p => !q || p.name.toLowerCase().includes(q))
+        .slice(0, 6);
+      list.innerHTML = hits.map(p =>
+        `<button type="button" data-pick="${p.id}">${esc(p.name)}` +
+        `<small>${esc(positionOf(p.id))}</small></button>`).join('');
+      list.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => {
+        if (side === 'a') kinA = b.dataset.pick; else kinB = b.dataset.pick;
+        openKinship();
+      });
+    };
+    inp.addEventListener('input', show);
+    inp.addEventListener('focus', show);
+  });
+  el.querySelectorAll('[data-ask]').forEach(b => b.onclick = () => openCard(b.dataset.ask));
+  $('kNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
 /* The card behind a person: the details that aren't worth room on the pod,
    the switch that marks the end of a line, and what they are to you. */
 function openCard(id){
@@ -2431,6 +2599,97 @@ function closeForm(){
 }
 const say = m => { $('live').textContent = m; };
 
+/* ── the kinship calculator ─────────────────────────────────────────────
+   Two jobs. It names what any two people are to each other, in both
+   directions — which matters here, because Shona terms are asymmetric: the
+   man your mother's brother is Sekuru to you, and you are Muzukuru to him.
+ 
+   And it reports what the tree CANNOT yet name, and precisely which missing
+   fact would fix each case. That is the part that improves as the family is
+   entered: the rules never change, but the tree's ability to apply them grows
+   with every birth year and every link somebody adds. So the panel does not
+   just say "94% named" — it says which person to ask about next, and how many
+   relationships that one answer would settle.
+ 
+   A note on what this deliberately is NOT. The engine is rule-based, not
+   learned, and that is the correct choice rather than a shortcut. Shona
+   kinship is a specified cultural system, not a statistical regularity to be
+   inferred: a model trained on a partly-built family tree would happily invent
+   plausible-looking terms for relationships the language does not name that
+   way. The brief for this app was explicit that where a term is not known the
+   app should describe the relationship and ask, never guess — and a learned
+   model is precisely a machine for guessing. What grows here is coverage and
+   evidence, not confidence. */
+
+// Every pair the tree cannot yet name, sorted by what is missing.
+function kinshipCoverage(budget){
+  budget = budget || 4000;
+  ancestryCache.clear();
+  const ids = people().map(p => p.id);
+  const n = ids.length;
+  const total = n * (n - 1) / 2;
+
+  let pairs = [];
+  let sampled = false;
+  if (total <= budget){
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) pairs.push([ids[i], ids[j]]);
+  } else {
+    // A large tree is measured from a sample rather than made to grind through
+    // millions of pairs. Seeded, so the number does not jitter between opens.
+    sampled = true;
+    let seed = 987654321 >>> 0;
+    const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
+    const seen = new Set();
+    let guard = 0;
+    while (pairs.length < budget && guard++ < budget * 12){
+      const i = Math.floor(rnd() * n), j = Math.floor(rnd() * n);
+      if (i === j) continue;
+      const lo = Math.min(i, j), hi = Math.max(i, j), k = lo + '|' + hi;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      pairs.push([ids[lo], ids[hi]]);
+    }
+  }
+
+  const gaps = { seniority: [], sex: [], unlinked: [], described: [] };
+  let named = 0;
+  for (const [a, b] of pairs){
+    const r = relationship(a, b);
+    if (!r) continue;
+    if (r.term){ named++; continue; }
+    if (r.choice) gaps.seniority.push([a, b]);
+    else if (/no traced link/.test(r.why)) gaps.unlinked.push([a, b]);
+    else if (!state.people[a].sex || !state.people[b].sex) gaps.sex.push([a, b]);
+    else gaps.described.push([a, b]);
+  }
+
+  // Which single missing fact is holding back the most answers. This is the
+  // useful end of the analysis: not "23 unknown" but "ask Tendai's birth year".
+  const blocking = new Map();
+  const bump = (id, need) => {
+    const k = id + '|' + need;
+    blocking.set(k, (blocking.get(k) || 0) + 1);
+  };
+  for (const [a, b] of gaps.seniority){
+    if (birthYear(a) === null) bump(a, 'born');
+    if (birthYear(b) === null) bump(b, 'born');
+  }
+  for (const [a, b] of gaps.sex){
+    if (!state.people[a].sex) bump(a, 'sex');
+    if (!state.people[b].sex) bump(b, 'sex');
+  }
+  const asks = [...blocking.entries()]
+    .map(([k, count]) => {
+      const [id, need] = k.split('|');
+      return { id, need, count };
+    })
+    .filter(x => state.people[x.id])
+    .sort((x, y) => y.count - x.count)
+    .slice(0, 6);
+
+  return { named, checked: pairs.length, total, sampled, gaps, asks };
+}
+
 /* Day or night.
  
    Which one somebody wants is not a property of the family tree, it is a
@@ -2444,9 +2703,9 @@ const say = m => { $('live').textContent = m; };
    for a bright room with a dark system setting or the reverse. */
 const THEME_KEY = 'muti-baobab-theme';
 const THEMES = [
-  { v: '',      label: '◐ Auto'  },
-  { v: 'light', label: '☀ Day'   },
-  { v: 'dark',  label: '☾ Night' }
+  { v: '',      label: 'Auto'  },
+  { v: 'light', label: 'Day'   },
+  { v: 'dark',  label: 'Night' }
 ];
 
 function applyTheme(v){
@@ -2653,6 +2912,7 @@ $('who').onclick = () => {
 
 $('dupes').onclick = openDuplicates;
 $('theme').onclick = cycleTheme;
+$('kin').onclick = openKinship;
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {

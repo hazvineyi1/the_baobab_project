@@ -221,6 +221,43 @@ passes the base URL and a Chromium path, and reports absent suites as
 **SKIPPED rather than passed**. A suite that reported nothing when its file was
 missing would turn an untested build green, which is worse than no suite.
 
+## The kinship calculator
+
+Two jobs. It names what any two people are to each other **in both
+directions**, which matters because Shona terms are not reciprocal: the man
+your mother's brother is *Sekuru* to you, and you are *Muzukuru* to him.
+
+And it reports what the tree **cannot** yet name, sorted by the missing fact:
+
+| gap | what would resolve it |
+|---|---|
+| older or younger undecided | both birth years, to choose Mukoma from Munin'ina |
+| term depends on he or she | record which |
+| no traced link | add the people in between |
+| described rather than named | nothing — the family has no single word, and the app will not invent one |
+
+It then ranks **which single missing fact is blocking the most answers** —
+"Anesu: he or she unknown, 4 relationships" — so the next question to ask a
+relative is the one that settles the most. That is the part that improves as
+the family is entered: the rules never change, but the tree's ability to apply
+them grows with every birth year and every link.
+
+### Why it is not a learned model
+
+The engine is rule-based, and that is a correctness decision rather than a
+shortcut. Shona kinship is a *specified cultural system*, not a statistical
+regularity to be inferred. A model trained on a partly-built family tree would
+confidently produce plausible-looking terms for relationships the language does
+not name that way — and the brief for this app was explicit that where a term
+is not known it should describe the relationship and ask, never guess. A
+learned model is precisely a machine for guessing. What grows here is coverage
+and evidence, not confidence.
+
+Ancestry walks are memoised (cleared on every render, since the tree may have
+changed shape) because one relationship needs two of them and a coverage scan
+asks for thousands. Trees past 4,000 pairs are measured from a seeded sample so
+the figure does not jitter between opens.
+
 ## The backdrop
 
 `public/baobab.webp` is the tree standing behind the family. If it is absent a
