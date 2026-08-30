@@ -98,6 +98,10 @@ function loadFrontend(){
     innerWidth: 1280, innerHeight: 800,
     setTimeout, clearTimeout, Math, JSON, Date, Set, Map, Object, Array, String, Number,
     localStorage: { getItem: () => null, setItem(){}, removeItem(){} },
+    // The page reads the family key out of the address; under test there is
+    // no address, so this is what it reads instead.
+    location: { protocol:'https:', origin:'https://example.test',
+                pathname:'/', hash:'', reload(){} },
     fetch: () => Promise.reject(new Error('offline under test')),
     confirm: () => false
   };
@@ -112,6 +116,8 @@ function loadFrontend(){
       teachTerm, forgetTerm, lexicon,
       frontier, isOpenEnd, descendantsOf, toggleRoot,
       setAside, restore, noticesFor, asidePeople, present, mergePeople, meName,
+      knownTotem, totemKey, totemsHere, totemSuggestions, MITUPO,
+      diffOps, remapId, familyLink,
       setMe(id){ meId = id; },
       setState(s){ state = s; }, getState(){ return state; }
     };`, sandbox);

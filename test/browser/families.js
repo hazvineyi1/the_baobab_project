@@ -14,8 +14,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE = process.env.MW_BASE_URL || 'http://127.0.0.1:3940/';
-const EXE  = process.env.MW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { BASE, EXE, openApp, ready } = require('./lib');
 
 let pass = 0, fail = 0;
 const ok  = m => { pass++; console.log('  ok   ' + m); };
@@ -25,13 +24,9 @@ const section = t => console.log('\n' + t);
 
 (async () => {
   const browser = await chromium.launch({ executablePath: EXE });
-  const ctx = await browser.newContext({ viewport:{ width:1280, height:960 } });
-  await ctx.route('**', r => r.request().url().startsWith(BASE) ? r.continue() : r.abort());
-  const page = await ctx.newPage();
+  const { ctx, page } = await openApp(browser, { viewport:{ width:1280, height:960 } });
   page.on('pageerror', e => bad('page error', e.message));
-  await page.goto(BASE, { waitUntil:'domcontentloaded' });
-  await page.waitForFunction(() => { try { return store === 'shared' && !!treeId; }
-                                     catch (e) { return false; } }, null, { timeout:20000 });
+  await ready(page);
 
   // A surname unique to this run. The home tree is shared and will already
   // hold other families — a suite that only passes against an empty database

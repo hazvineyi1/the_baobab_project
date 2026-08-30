@@ -92,19 +92,53 @@ server.js`, after `npm install dotenv`).
 ## Project layout
 
 ```
-server.js          Express server + the /api/shared/:key data endpoint
+server.js          Express server: the gate, then the API, then the page
+auth.js            The passphrase gate
+db/                pool, migrations runner, ops, reads, duplicates, crosstree
+migrations/        numbered SQL, applied on boot, recorded in schema_migrations
+routes/tree.js     the HTTP surface for one tree
 public/index.html  The entire frontend — tree UI, kinship-term engine, styling
+test/              suites; test/browser/ needs Chromium and a live server
 package.json
 .env.example
 ```
 
 ## If you want to extend it later
 
-- **Real-time sync**: right now, everyone has to click "↻ Refresh" to see
-  others' changes. Adding a poll-every-few-seconds or a WebSocket push
-  would make it live.
-- **A password or invite link**: there's no access control at all today.
-  A simple shared passphrase gate would be a small addition if the tree
-  ever contains anything you don't want fully public.
+- **Accounts**: identity is self-claimed — you tap your own name in the tree,
+  and that name is stamped on what you record. Good enough to say who entered
+  a relative and who to tell before setting one aside; not enough to *prove*
+  anybody is who they say. Real accounts would sit on top of the family keys
+  below, which stay as the invitation either way.
 - **Backups**: Railway's Postgres has automatic backups, but it's worth
   knowing where to find them before you need them.
+
+## Access, and exactly what it is worth
+
+Two layers, and it is worth being precise about both, because neither is an
+account system.
+
+**The passphrase gate** (`APP_PASSPHRASE`) answers "may this person use this
+deployment at all". Everyone types it once; the browser then holds a signed,
+expiring cookie. It stops crawlers, scrapers and anybody who is merely sent
+the address. It does not stop somebody who was given the passphrase and should
+not have been — a shared secret is only as private as the people sharing it.
+
+Set it in the deployment's environment variables and nowhere else. It is never
+committed: this repository is public. **Without it, a deployment that has a
+database refuses to serve the tree** rather than serving it openly — running
+locally with no database, the gate stays out of the way.
+
+**A family key** answers "which family's tree is this". Each tree has one, and
+it lives in the address: `…/#/f/<key>`. Hold the key and you can read and add
+to that family's tree; without it you cannot even find it, because nothing
+lists keys and they are too long to guess. That is capability access:
+
+- anyone the link is passed to has exactly the access of whoever passed it,
+  and there is no way to tell them apart afterwards;
+- it cannot be taken back from one person without changing it for everybody
+  (which the app offers, saying plainly what it costs).
+
+What it buys is that one family's records stop being visible to every other
+family on the deployment — and that a relative can start recording their
+grandmother without an email address, a password, or a sign-up first.

@@ -49,12 +49,19 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
 
   /* Which tree this deployment serves, so the page does not have to be
      configured with a UUID. Settled once at boot. */
-  r.get('/home', (req, res) => {
+  r.get('/home', async (req, res) => {
     if (!homeTreeId) {
       return res.status(503).json({
         error: 'no_tree', message: 'the server has not finished choosing a tree' });
     }
-    res.json({ treeId: homeTreeId });
+    try {
+      // The home family's own key travels with it, so the first person to open
+      // the deployment has a link to share without having to go and find one.
+      const { rows } = await pool.query(
+        'SELECT id, key, name FROM trees WHERE id = $1', [homeTreeId]);
+      res.json(rows.length ? { treeId: rows[0].id, key: rows[0].key, name: rows[0].name }
+                           : { treeId: homeTreeId });
+    } catch (e) { sendError(res, e); }
   });
 
   /* The whole tree, plus the change-log position it was read at.
@@ -68,20 +75,68 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
     } catch (e) { sendError(res, e); }
   });
 
+  /* Deliberately does NOT list the keys.
+ 
+     The key is the credential that opens a family's tree. An endpoint that
+     hands out every key would make every family readable by anybody through
+     the gate, which is the whole thing the keys exist to prevent. Names and
+     sizes are enough to say "these families are here"; opening one needs the
+     link its family gave you. */
   r.get('/trees', async (req, res) => {
     try {
-      const { rows } = await pool.query(
-        'SELECT id, name, created_at FROM trees ORDER BY created_at');
+      const { rows } = await pool.query(`
+        SELECT t.id, t.name, t.created_at,
+               (SELECT count(*)::int FROM people p
+                 WHERE p.tree_id = t.id AND p.aside_at IS NULL) AS people
+          FROM trees t ORDER BY t.created_at`);
       res.json({ trees: rows });
     } catch (e) { sendError(res, e); }
   });
 
+  /* Start a family. Returns the key once, in the response that creates it —
+     the only time the server volunteers a key it was not already given. */
   r.post('/trees', async (req, res) => {
     try {
-      const name = String(req.body?.name || 'The Baobab Project').slice(0, 200);
+      const name = String(req.body?.name || '').trim().slice(0, 200) || 'A family';
+      const by = actorOf(req);
       const { rows } = await pool.query(
-        'INSERT INTO trees (name) VALUES ($1) RETURNING id, name, created_at', [name]);
+        `INSERT INTO trees (name, created_by) VALUES ($1, $2)
+         RETURNING id, key, name, created_at`, [name, by]);
       res.status(201).json(rows[0]);
+    } catch (e) { sendError(res, e); }
+  });
+
+  /* Open a family by its key. The key is in the path rather than a query
+     string because query strings are the part of a URL that leaks most
+     readily into logs and referrer headers — and this one is a credential. */
+  r.get('/family/:key', async (req, res) => {
+    try {
+      const key = String(req.params.key || '');
+      const { rows } = await pool.query(
+        'SELECT id, name, created_at FROM trees WHERE key = $1', [key]);
+      if (!rows.length) {
+        // The same answer whether the key never existed or has been changed:
+        // anything finer helps somebody work out which keys are real.
+        return res.status(404).json({
+          error: 'no_such_family',
+          message: 'No family answers to that link. It may have been changed, ' +
+                   'or copied incompletely.'
+        });
+      }
+      res.json({ treeId: rows[0].id, name: rows[0].name, key });
+    } catch (e) { sendError(res, e); }
+  });
+
+  /* Change a family's key, locking out everyone holding the old one. A
+     deliberate act with a real cost, so it says what the cost is and hands
+     back the new link exactly once. */
+  r.post('/tree/:id/rotate-key', async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `UPDATE trees SET key = mw_new_tree_key(), key_set_at = clock_timestamp()
+          WHERE id = $1 RETURNING id, key, name`, [req.params.id]);
+      if (!rows.length) return res.status(404).json({ error: 'no_such_family' });
+      res.json(rows[0]);
     } catch (e) { sendError(res, e); }
   });
 

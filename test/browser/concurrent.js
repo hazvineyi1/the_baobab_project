@@ -15,8 +15,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE = process.env.MW_BASE_URL || 'http://127.0.0.1:3940/';
-const EXE  = process.env.MW_CHROMIUM || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
+const { BASE, EXE, openApp, ready } = require('./lib');
 
 let pass = 0, fail = 0;
 const ok  = m => { pass++; console.log('  ok   ' + m); };
@@ -24,21 +23,14 @@ const bad = (m, d) => { fail++; console.log('  FAIL ' + m + (d ? '  — ' + d : 
 const is  = (a, b, m) => a === b ? ok(m) : bad(m, `expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 const section = t => console.log('\n' + t);
 
-const ready = page => page.waitForFunction(
-  () => { try { return store === 'shared' && !!treeId; } catch (e) { return false; } },
-  null, { timeout: 20000 });
-
 const settle = (page, ms = 1200) => page.waitForTimeout(ms);
 
 (async () => {
   const browser = await chromium.launch({ executablePath: EXE });
 
   const open = async (who) => {
-    const ctx = await browser.newContext({ viewport:{ width:1280, height:900 } });
-    await ctx.route('**', r => r.request().url().startsWith(BASE) ? r.continue() : r.abort());
-    const page = await ctx.newPage();
+    const { ctx, page } = await openApp(browser, { viewport:{ width:1280, height:900 } });
     page.on('pageerror', e => bad(`page error (${who})`, e.message));
-    await page.goto(BASE, { waitUntil:'domcontentloaded' });
     await ready(page);
     return { ctx, page };
   };

@@ -276,7 +276,13 @@ body{
 
 /* ── the grow form ──────────────────────────────────────────────────── */
 #form{
-  position:absolute; transform:translate(-50%,-50%); z-index:40;
+  position:absolute; transform:translate(-50%,-50%);
+  /* Above the planting screen (50) and the toolbar (45). A panel is a
+     modal: it has to sit over whatever it was opened from, and the one
+     opened from the planting screen used to sit underneath it. Still
+     below the two banners, which report on the connection and must stay
+     readable whatever is open. */
+  z-index:60;
   width:252px; padding:15px; border-radius:22px 6px 22px 6px;
   background:var(--pod); border:2px solid var(--gold);
   box-shadow:var(--lift); animation:bud .2s ease-out backwards;
@@ -459,6 +465,14 @@ body{
   margin:0 0 8px; letter-spacing:.01em;
 }
 #seed h1 em{font-style:normal; color:var(--gold);}
+/* An empty family is exactly when somebody wants to send the link round, and
+   it is also when the toolbar is hidden — so the way to it lives here too. */
+#seed #seedFamily{margin-top:16px; font-size:12.5px; color:var(--muted); line-height:1.6;}
+#seed #seedFamily button{
+  padding:0; border:none; background:none; cursor:pointer;
+  color:var(--gold); font-family:'Karla',sans-serif; font-size:12.5px; font-weight:700;
+  text-decoration:underline; text-underline-offset:2px;
+}
 #seed p{color:var(--muted); font-size:15px; line-height:1.6; margin:0 auto 22px; max-width:34ch;}
 #seed .box{
   padding:18px; border-radius:26px 8px 26px 8px;
@@ -524,6 +538,11 @@ body{
 /* A row in a panel that is information rather than a button. */
 #form .askrow.static{cursor:default;}
 #form .askrow.static:hover{background:var(--pod);}
+/* What a recognised totem is, shown under the box as confirmation that the
+   app understood — never as a correction. */
+.kinlist .kinnote{
+  padding:7px 11px; color:var(--muted); font-size:11.5px; line-height:1.5;
+}
 #form .askrow .mini{
   flex:none; margin-left:8px; padding:5px 11px; border-radius:999px; cursor:pointer;
   background:transparent; border:1.5px solid var(--pod-edge); color:var(--ink);
@@ -608,6 +627,10 @@ body{
     <input id="seedName" class="fld" placeholder="A name to start with" autocomplete="off">
     <button class="btn" id="seedGo">Plant the first person</button>
   </div>
+  <p id="seedFamily" hidden>
+    <button type="button" id="seedFamilyGo">Get this family's link</button>
+    to send to your relatives, so they can fill it in with you.
+  </p>
 </div>
 
 <div id="bar" hidden>
@@ -619,6 +642,8 @@ body{
   <button class="who" id="roots">Roots</button>
   <button class="who" id="aside" hidden></button>
   <button class="who" id="families" hidden>Other families</button>
+  <button class="who" id="family" hidden>This family</button>
+  <button class="who" id="totems" hidden>Mitupo</button>
   <button class="who" id="kin">Kinship</button>
   <button class="dupes" id="dupes" hidden></button>
   <span class="tally"><b id="count">0</b> in the tree</span>
@@ -1922,6 +1947,8 @@ function render(){
   // would cover the one panel that can bring those records back — turning a
   // reversible act into an unreversible one at the last step.
   const emptied = !people().length && asidePeople().length > 0;
+  const seedFam = $('seedFamily');
+  if (seedFam) seedFam.hidden = store !== 'shared';
   $('seed').hidden = !!people().length || emptied;
   $('hint').hidden = (!people().length && !emptied) || people().length > 4;
   if (emptied){
@@ -2684,6 +2711,289 @@ function openDuplicates(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
+/* ── mitupo ──────────────────────────────────────────────────────────────
+   Identifying totems, and nothing more.
+
+   A mutupo is a clan's totem, inherited down the male line, and it is what
+   Zimbabweans actually use to work out whether two people are of one house —
+   which is why the cross-tree matcher weighs it more heavily than any other
+   single signal. It also governs who may marry whom.
+
+   THIS DOES NOT INFER ANYTHING FROM IT. No kinship term is derived here, no
+   relationship is proposed, nothing is forbidden. Totem-based rules are real
+   and were explicitly left out for now; the app records the totem, recognises
+   it when it is written a different way, and shows which totems are in the
+   family. That is the whole of it.
+
+   The list is for RECOGNITION, never restriction. Anything typed is kept
+   exactly as typed — a family's own word for their own totem is not something
+   an autocomplete list gets to overrule, and the list below is certainly not
+   complete. What it does is stop the same clan being recorded three ways and
+   then failing to match across two families' trees. */
+
+const MITUPO = [
+  // canonical, what it names in English, and the other ways families write it
+  ['Shumba',   'lion',                 ['sibanda', 'nyamuziwa']],
+  ['Nzou',     'elephant',             ['zhou', 'samanyanga', 'ndlovu']],
+  ['Soko',     'monkey',               ['mukanya', 'nduna', 'vhudzijena']],
+  ['Moyo',     'heart',                ['chirandu', 'dewa']],
+  ['Mhofu',    'eland',                ['shava', 'museyamwa', 'mhukahuru']],
+  ['Nyati',    'buffalo',              ['gumbo', 'ndlovu yemvura']],
+  ['Dziva',    'pool, water',          ['hove', 'shiri yedziva']],
+  ['Hungwe',   'fish eagle',           ['shiri', 'zhizha']],
+  ['Ngwena',   'crocodile',            ['garwe']],
+  ['Mbizi',    'zebra',                ['tembo', 'dube']],
+  ['Tsivo',    'eland (Tsivo house)',  ['tsiwo']],
+  ['Beta',     'the Beta house',       []],
+  ['Gushungo', 'the Gushungo house',   []],
+  ['Nhewa',    'the Nhewa house',      []],
+  ['Bonga',    'the Bonga house',      []],
+  ['Chihwa',   'the Chihwa house',     []],
+  ['Ngara',    'the Ngara house',      []],
+  ['Hwesa',    'the Hwesa house',      []],
+  ['Nembire',  'the Nembire house',    []],
+  ['Mhara',    'duiker',               []]
+];
+
+// Written form -> canonical entry. Built once.
+const MITUPO_INDEX = (() => {
+  const ix = new Map();
+  for (const [name, means, also] of MITUPO){
+    ix.set(name.toLowerCase(), { name, means });
+    for (const alt of also) ix.set(alt.toLowerCase(), { name, means, alt });
+  }
+  return ix;
+})();
+
+/* What a written totem is, if this app recognises it. Returns null rather than
+   guessing — an unrecognised totem is not an error and must not be treated as
+   one. */
+function knownTotem(raw){
+  const t = String(raw || '').trim().toLowerCase()
+    // "Mhofu yeMukono", "Soko Murehwa": the praise name that follows tells you
+    // which house within the clan, not which clan. The first word is the clan.
+    .replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  return MITUPO_INDEX.get(t) || MITUPO_INDEX.get(t.split(' ')[0]) || null;
+}
+
+/* Totems written differently for the same clan should compare equal. Used only
+   for grouping and display here — the stored value is always what was typed. */
+function totemKey(raw){
+  const k = knownTotem(raw);
+  if (k) return k.name.toLowerCase();
+  return String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/* Which totems this family carries, commonest first. */
+function totemsHere(){
+  const groups = new Map();
+  for (const p of people()){
+    if (!p.totem) continue;
+    const key = totemKey(p.totem);
+    const g = groups.get(key) || { key, known: knownTotem(p.totem), written: new Set(), people: [] };
+    g.written.add(p.totem.trim());
+    g.people.push(p);
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => b.people.length - a.people.length);
+}
+
+/* Suggestions under a totem box. Matches on the canonical name, on the
+   alternate spellings, and on what it means in English, because somebody who
+   knows their totem is "the eland one" should be able to find it. */
+function totemSuggestions(typed){
+  const q = String(typed || '').trim().toLowerCase();
+  if (!q) return [];
+  const hits = [];
+  for (const [name, means, also] of MITUPO){
+    const hay = [name.toLowerCase(), means.toLowerCase(), ...also];
+    if (hay.some(h => h.startsWith(q)) ) hits.push({ name, means, rank: 0 });
+    else if (hay.some(h => h.includes(q))) hits.push({ name, means, rank: 1 });
+  }
+  return hits.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name)).slice(0, 6);
+}
+
+/* Attach a suggestion list to a totem input. Never rewrites what was typed
+   unless the person picks something. */
+function wireTotem(inputId){
+  const input = $(inputId);
+  if (!input) return;
+  const list = document.createElement('div');
+  list.className = 'kinlist';
+  input.insertAdjacentElement('afterend', list);
+
+  const draw = () => {
+    const hits = totemSuggestions(input.value);
+    const known = knownTotem(input.value);
+    // Once it is recognised there is nothing to suggest — say what it is
+    // instead, so the person can see the app understood them.
+    if (known && known.name.toLowerCase() === input.value.trim().toLowerCase()){
+      list.innerHTML = `<div class="kinnote">${esc(known.name)} — ${esc(known.means)}</div>`;
+      return;
+    }
+    list.innerHTML = hits.map(h =>
+      `<button type="button" class="kinopt" data-totem="${esc(h.name)}">` +
+      `${esc(h.name)} <small>${esc(h.means)}</small></button>`).join('');
+    list.querySelectorAll('[data-totem]').forEach(b => b.onclick = () => {
+      input.value = b.dataset.totem;
+      draw();
+      input.focus();
+    });
+  };
+  input.addEventListener('input', draw);
+  input.addEventListener('focus', draw);
+  draw();
+}
+
+/* The totems in this family, and who carries each. */
+function openTotems(){
+  closeForm();
+  pending = { kind:'dupes', anchorId: sel || state.rootId };
+  const groups = totemsHere();
+  const without = people().filter(p => !p.totem).length;
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML =
+    `<p class="cap">Mitupo in this family</p>` +
+    (groups.length
+      ? groups.map(g => {
+          const written = [...g.written];
+          const spellings = written.length > 1
+            ? `<small>written ${written.map(esc).join(', ')}</small>` : '';
+          return `<button type="button" class="askrow" data-totem-group="${esc(g.key)}">` +
+            `<u>${esc(g.known ? g.known.name : written[0])}` +
+              `${g.known ? ` <small style="display:inline">${esc(g.known.means)}</small>` : ''}` +
+              `<small>${g.people.length} ${g.people.length === 1 ? 'person' : 'people'}</small>` +
+              spellings +
+            `</u><em>show</em></button>`;
+        }).join('')
+      : `<p class="covnote">No totems recorded yet. A person's mutupo goes on ` +
+        `their card — it is the surest way two families ever work out they are ` +
+        `of one house.</p>`) +
+
+    (without
+      ? `<p class="covnote" style="margin-top:12px;">${without} ` +
+        `${without === 1 ? 'person has' : 'people have'} no totem recorded.</p>`
+      : '') +
+
+    `<div class="row"><button class="btn" id="totNo">Done</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  el.querySelectorAll('[data-totem-group]').forEach(b => b.onclick = () => {
+    const g = totemsHere().find(x => x.key === b.dataset.totemGroup);
+    if (!g || !g.people.length) return;
+    closeForm();
+    sel = g.people[0].id;
+    render(); bringIntoView(sel); revealBuds();
+    say(`${g.people.length} ${g.people.length === 1 ? 'person' : 'people'} of ` +
+        `${g.known ? g.known.name : b.dataset.totemGroup}.`);
+  });
+  $('totNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
+/* This family: the link that opens it, and how to start another.
+ 
+   The honest description of the link, which the panel gives rather than
+   implies: whoever holds it can read and add to this family's tree. It is an
+   invitation, not a password — it cannot be taken back from one person
+   without changing it for everybody, and changing it is offered here with
+   that cost stated plainly rather than buried. */
+function openFamily(){
+  closeForm();
+  pending = { kind:'dupes', anchorId: sel || state.rootId };
+  const link = familyKey ? familyLink(familyKey) : '';
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML =
+    `<p class="cap">${familyName ? esc(familyName) : 'This family'}</p>` +
+
+    (link
+      ? `<p class="lbl">The link that opens this family</p>` +
+        `<input id="famLink" class="fld" readonly value="${esc(link)}">` +
+        `<p class="covnote">Send this to your relatives and they can add to the ` +
+        `same tree. Anyone who has it can read and add — it is an invitation, ` +
+        `not a password.</p>` +
+        `<div class="row"><button class="btn ghost" id="famCopy">Copy the link</button></div>`
+      : `<p class="covnote">This deployment is serving one family.</p>`) +
+
+    `<p class="lbl" style="margin-top:16px;">Start another family</p>` +
+    `<p class="covnote">A separate tree, with its own link. Useful when the ` +
+    `people you are recording are not related to the family above — the two ` +
+    `can still find each other later through <b>Other families</b>.</p>` +
+    `<input id="famName" class="fld" placeholder="Whose family? e.g. the Mutasa family" autocomplete="off">` +
+    `<div class="row"><button class="btn" id="famGo">Start it</button>` +
+    `<button class="btn ghost" id="famNo">Close</button></div>` +
+
+    (link
+      ? `<p class="lbl" style="margin-top:16px;">If the link has gone somewhere it should not</p>` +
+        `<p class="covnote">Changing it locks out <b>everyone</b> holding the old ` +
+        `one, including your own relatives, until you send them the new one. ` +
+        `Nothing in the tree is lost.</p>` +
+        `<div class="row"><button class="btn ghost" id="famRotate">Change the link</button></div>`
+      : '');
+
+  document.body.appendChild(el);
+  placeForm(el);
+
+  const copy = () => {
+    const f = $('famLink');
+    f.select();
+    try { document.execCommand('copy'); say('Link copied.'); }
+    catch (e) { say('Select the link and copy it.'); }
+  };
+  if ($('famCopy')) $('famCopy').onclick = copy;
+
+  $('famGo').onclick = async () => {
+    const name = $('famName').value.trim();
+    if (!name){ $('famName').focus(); return; }
+    $('famGo').disabled = true;
+    try {
+      const r = await fetch('/api/trees', {
+        method:'POST', headers:{ 'Content-Type':'application/json',
+                                 'X-Muti-Actor': meName() },
+        body: JSON.stringify({ name })
+      });
+      if (!r.ok) throw new Error('the server answered ' + r.status);
+      const made = await r.json();
+      // Going there is a navigation, not a state change: the whole page
+      // reloads onto the new family, which is the only way to be certain no
+      // part of the previous family is still on screen.
+      rememberFamily(made.key);
+      location.hash = '#/f/' + made.key;
+      location.reload();
+    } catch (e) {
+      $('famGo').disabled = false;
+      say('That family could not be started just now.');
+    }
+  };
+
+  if ($('famRotate')) $('famRotate').onclick = async () => {
+    if (!confirm('Change this family\u2019s link?\n\n' +
+                 'Everyone holding the old link — including your relatives — ' +
+                 'will lose access until you send them the new one. ' +
+                 'Nothing in the tree is lost.')) return;
+    try {
+      const r = await fetch(`/api/tree/${treeId}/rotate-key`, {
+        method:'POST', headers:{ 'X-Muti-Actor': meName() } });
+      if (!r.ok) throw new Error('answered ' + r.status);
+      const made = await r.json();
+      rememberFamily(made.key);
+      location.hash = '#/f/' + made.key;
+      location.reload();
+    } catch (e) { say('The link could not be changed just now.'); }
+  };
+
+  $('famNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
 /* Other families who may share an ancestor with this one.
  
    The point of the whole project, in one screen: everybody records their own
@@ -3257,6 +3567,7 @@ function openCard(id){
   el.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(btn =>
     btn.onclick = () => seg.querySelectorAll('button')
       .forEach(o => o.setAttribute('aria-pressed', String(o === btn)))));
+  wireTotem('cTotem');
 
   const commit = () => {
     snapshot();
@@ -3326,6 +3637,7 @@ function openForm(kind, anchorId){
   el.querySelectorAll('.seg').forEach(seg => seg.querySelectorAll('button').forEach(b =>
     b.onclick = () => seg.querySelectorAll('button')
       .forEach(o => o.setAttribute('aria-pressed', String(o === b)))));
+  wireTotem('fTotem');
   $('fGo').onclick = submitForm;
   $('fNo').onclick = closeForm;
   el.addEventListener('keydown', e => {
@@ -3686,6 +3998,13 @@ function updateWho(){
   // is a server holding other families to compare it with.
   const fam = $('families');
   if (fam) fam.hidden = store !== 'shared' || people().length < 2;
+  const mine = $('family');
+  if (mine){
+    mine.hidden = store !== 'shared';
+    mine.textContent = familyName || 'This family';
+  }
+  const tot = $('totems');
+  if (tot) tot.hidden = !people().some(p => p.totem);
   const btn = $('who');
   if (!btn) return;
   const p = meId && state.people[meId];
@@ -3863,6 +4182,9 @@ $('roots').onclick = openRoots;
 $('stalledGo').onclick = () => location.reload();
 $('aside').onclick = openAside;
 $('families').onclick = openFamilies;
+$('family').onclick = openFamily;
+$('totems').onclick = openTotems;
+$('seedFamilyGo').onclick = openFamily;
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {
@@ -3906,6 +4228,16 @@ function plant(){
   say(`${name} planted. Tap them to grow the tree.`);
 }
 
+/* Pasting a different family's link into the address bar changes only the
+   hash, which does not reload the page — so without this the address would
+   name one family while the screen showed another. A full reload rather than
+   a re-read: switching family replaces everything, and the only way to be
+   certain none of the previous family is still on screen is to start over. */
+addEventListener('hashchange', () => {
+  const asked = familyKeyFromUrl();
+  if (asked && asked !== familyKey) location.reload();
+});
+
 addEventListener('resize', applyTransform);
 addEventListener('keydown', e => { if (e.key === 'Escape' && !pending && sel){ sel = null; render(); } });
 
@@ -3945,8 +4277,13 @@ addEventListener('keydown', e => { if (e.key === 'Escape' && !pending && sel){ s
    Never write a tree we did not successfully read. A page that cannot read
    says so and refuses to save. */
 
-let store = 'local', stalledWhy = '', timer = null;
-let treeId = null;          // which tree this deployment serves
+// null until load() has decided. It starts unknown rather than 'local'
+// because before the first request the page genuinely does not know which of
+// the three it is in, and a default of 'local' is a claim — one that reads as
+// "no server here" during the moment before the server answers.
+let store = null, stalledWhy = '', timer = null;
+let treeId = null;          // which family this page is looking at
+let familyKey = null, familyName = '';
 let headSeq = 0;            // how far down the change log this page has read
 let synced = null;          // the tree as the server last confirmed it
 let sending = false;        // a batch is in flight
@@ -3958,9 +4295,51 @@ const copyState = () => JSON.parse(JSON.stringify(state));
 
 /* ── reading ─────────────────────────────────────────────────────────── */
 
+/* Which family this page is looking at.
+ 
+   The key is a credential, so it lives in the address rather than in a query
+   string — query strings are the part of a URL that leaks most readily into
+   logs and referrer headers. Remembered here so a relative who opened the
+   link once comes back to their own family rather than to a stranger's. */
+const FAM_KEY = 'muti-family-key';
+
+function familyKeyFromUrl(){
+  const m = /^#\/f\/([a-z2-9]{16,64})$/.exec(location.hash || '');
+  return m ? m[1] : null;
+}
+function rememberFamily(key){
+  try { key ? localStorage.setItem(FAM_KEY, key) : localStorage.removeItem(FAM_KEY); }
+  catch (e) {}
+}
+function rememberedFamily(){
+  try { return localStorage.getItem(FAM_KEY); } catch (e) { return null; }
+}
+function familyLink(key){
+  return location.origin + location.pathname + '#/f/' + key;
+}
+
 async function load(){
   let r = null;
-  try { r = await fetch('/api/home', { headers:{ Accept:'application/json' } }); }
+  // A key in the address wins over the one this browser remembers, so a link
+  // somebody sends always opens the family they meant.
+  const fromUrl = familyKeyFromUrl();
+  const asked = fromUrl || rememberedFamily();
+  // Which request actually answered, because the three cases want different
+  // words for a 404: a link that names nothing is a dead link and must say so;
+  // a remembered key that names nothing is just stale and should quietly give
+  // way to the default; and the default itself answering 404 means there is no
+  // API on this origin at all.
+  let via = asked ? (fromUrl ? 'link' : 'remembered') : 'home';
+  try {
+    r = asked
+      ? await fetch('/api/family/' + encodeURIComponent(asked), { headers:{ Accept:'application/json' } })
+      : await fetch('/api/home', { headers:{ Accept:'application/json' } });
+    if (r && r.status === 404 && via === 'remembered'){
+      rememberFamily(null);
+      r = await fetch('/api/home', { headers:{ Accept:'application/json' } });
+      via = 'home';
+    }
+  }
   catch (e) { r = null; }
 
   if (r && r.ok && (r.headers.get('content-type') || '').includes('json')){
@@ -3968,12 +4347,19 @@ async function load(){
       const home = await r.json();
       if (!home || !home.treeId) throw new Error('the server named no tree');
       treeId = home.treeId;
+      familyKey = home.key || asked || null;
+      familyName = home.name || '';
+      if (familyKey) rememberFamily(familyKey);
       await pull();
       store = 'shared';
     } catch (e) {
       store = 'stalled';
       stalledWhy = 'The tree could not be read (' + e.message + ').';
     }
+  } else if (r && r.status === 404 && via === 'link'){
+    store = 'stalled';
+    stalledWhy = 'No family answers to that link. It may have been changed, ' +
+                 'or copied without its last few characters.';
   } else if (r && r.status === 404){
     // Nothing serving the API on this origin — a static host, or the page
     // opened straight from disk. This browser's own tree is the right one.

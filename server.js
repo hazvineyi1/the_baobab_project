@@ -17,12 +17,32 @@ const { migrate } = require('./db/migrate');
 const treeRoutes = require('./routes/tree');
 const { trigramAvailable } = require('./db/reads');
 const { ensureHomeTree } = require('./db/home');
+const { gate } = require('./auth');
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+// The gate's own form posts as a form, not as JSON.
+app.use(express.urlencoded({ extended: false, limit: '4kb' }));
 
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
+
+// Railway terminates TLS in front of this process, so req.secure is only true
+// if Express is told to believe the proxy's header. Without this the session
+// cookie never gets its Secure flag in production.
+app.set('trust proxy', 1);
+
+/* Everything below is behind the passphrase, including the static page and the
+   whole API. Mounted here, before any route, so a route added later cannot
+   accidentally sit outside it — the ordering is the guarantee, and a gate you
+   have to remember to apply is one that eventually is not.
+ 
+   The passphrase itself comes from the environment and appears nowhere else:
+   not in this repository, not in a log line, not in an error message. */
+app.use(gate({
+  passphrase: process.env.APP_PASSPHRASE,
+  hasDatabase: !!DATABASE_URL
+}));
 
 // The old whole-tree blob API (/api/shared/:key). OFF by default now that the
 // page speaks /api/tree/:id/ops.
