@@ -249,6 +249,16 @@ as the view descends through the ancestors. One reflection would only be as
 deep as the crown is tall, and travelling further back would be rewarded with
 empty ground.
 
+### Sizing
+
+The backdrop is sized by **width**, not height. Sizing by height keeps it
+small: only the sky above the horizon is available, and that is a little over
+half the screen. A baobab's presence is in its spread, so the crown is allowed
+to run past the top of the frame the way it does in every photograph of one.
+`BG_PHOTO.width` is the fraction of the viewport it spans; `BG_PHOTO.crown`
+caps how much may be lost off the top, so a short wide window does not end up
+showing nothing but trunk.
+
 ### Replacing it
 
 Drop any baobab image into `public/` as `baobab.webp`, `.jpg` or `.png`. A
