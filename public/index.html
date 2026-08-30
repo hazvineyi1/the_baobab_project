@@ -367,6 +367,7 @@ body{
 }
 #form .covbar i{display:block; height:100%; background:var(--leaf);}
 #form .covnote{margin:0 0 8px; font-size:11.5px; color:var(--muted); line-height:1.5;}
+#form .roothint{margin:-4px 0 10px; font-size:10.5px; line-height:1.5; color:var(--muted);}
 #form .covnote b{color:var(--ink);}
 #form .gaps{margin-bottom:4px;}
 #form .gaprow{
@@ -564,6 +565,7 @@ body{
   <button id="clear">Clear</button>
   <button class="who" id="theme" title="Day, night, or follow this device">Auto</button>
   <button class="who" id="who">You: <b>—</b></button>
+  <button class="who" id="roots">Roots</button>
   <button class="who" id="kin">Kinship</button>
   <button class="dupes" id="dupes" hidden></button>
   <span class="tally"><b id="count">0</b> in the tree</span>
@@ -639,6 +641,61 @@ function addPerson(name, sex, totem, born, died){
   };
   fresh.add(id);
   return id;
+}
+
+/* ── the frontier of the tree ───────────────────────────────────────────
+   There are two ways a line can stop, and they mean opposite things.
+ 
+   A ROOT is a statement: somebody has said "this is as far back as we can
+   trace". The tree stops asking for their parents and draws them as the
+   taproot everything else grows from.
+ 
+   An OPEN END is the absence of a statement: this person has no parents
+   recorded and nobody has said whether they could. It is not an answer, it is
+   a question nobody has asked yet.
+ 
+   Keeping them apart is what lets the tree show where it can still grow. A
+   root says "we tried"; an open end says "somebody should try". */
+
+// No parents recorded, and nobody has declared this the end of the line.
+function isOpenEnd(id){
+  const p = state.people[id];
+  if (!p || p.root) return false;
+  const pu = parentUnionOf(id);
+  return !pu || pu.partners.filter(x => state.people[x]).length === 0;
+}
+
+// Everyone below somebody, and how many generations deep the record goes.
+function descendantsOf(id){
+  const seen = new Set();
+  let depth = 0;
+  const walk = (who, d) => {
+    for (const u of unionsOf(who)){
+      for (const kid of u.children){
+        if (!state.people[kid] || seen.has(kid)) continue;
+        seen.add(kid);
+        if (d + 1 > depth) depth = d + 1;
+        walk(kid, d + 1);
+      }
+    }
+  };
+  walk(id, 0);
+  return { people: seen, count: seen.size, depth };
+}
+
+/* Where the tree can still be deepened. Roots first — those are the ends
+   somebody has vouched for — then the open ends nobody has spoken for. */
+function frontier(){
+  const roots = [], open = [];
+  for (const p of people()){
+    const d = descendantsOf(p.id);
+    const entry = { id: p.id, name: p.name, born: p.born,
+                    below: d.count, depth: d.depth };
+    if (p.root) roots.push(entry);
+    else if (isOpenEnd(p.id)) open.push(entry);
+  }
+  const bySize = (a, b) => b.below - a.below || b.depth - a.depth;
+  return { roots: roots.sort(bySize), open: open.sort(bySize) };
 }
 
 /* Marking somebody as the root of the line says "this is as far back as we
@@ -1814,6 +1871,12 @@ function placeBuds(){
   ];
   if (canParent) out.push({ kind:'parent', icon:'↓',
     label:pu && pu.partners.length ? 'Other parent' : 'Parent', at:place([90, 60, 120, 35, 145]) });
+  // A rooted person loses the Parent bud, which on its own reads as "you
+  // cannot go further" rather than "we said this was as far as we got".
+  // This puts the way through in the same place the Parent bud would have
+  // been: one tap lifts the root and opens the form to add the parent.
+  if (isRoot) out.push({ kind:'deepen', icon:'↓', label:'Deepen the root',
+                         at:place([90, 60, 120, 35, 145]) });
 
   // Panning re-runs this on every frame. Rebuilding the markup each time would
   // restart the pop-in animation and make the buds flicker, so once the same
@@ -2441,6 +2504,70 @@ function openDuplicates(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
+/* Where the tree ends, and where it could still grow.
+ 
+   The point of this project is that everybody records their own family and the
+   lines keep going down until two of them meet in the same ancestor. So the
+   most important thing this app can show is not what has been recorded — it is
+   where the recording stops, and which of those stops somebody could still
+   push past. */
+function openRoots(){
+  closeForm();
+  const f = frontier();
+  pending = { kind:'dupes', anchorId: sel || state.rootId };
+
+  const row = (e, kind) =>
+    `<button type="button" class="askrow" data-goto="${e.id}">` +
+      `<u>${esc(e.name)}${e.born ? ` <small style="display:inline">b. ${esc(e.born)}</small>` : ''}` +
+        `<small>${e.below
+          ? `${e.below} ${e.below === 1 ? 'person' : 'people'} below, ` +
+            `${e.depth} generation${e.depth === 1 ? '' : 's'} deep`
+          : 'nobody recorded below them yet'}</small></u>` +
+      `<em>${kind === 'root' ? 'deepen' : 'trace back'}</em>` +
+    `</button>`;
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML =
+    `<p class="cap">Where the tree stops</p>` +
+
+    (f.roots.length
+      ? `<p class="lbl">Rooted — as far back as anyone has traced</p>` +
+        `<p class="covnote">Somebody has vouched for these. If you know who came ` +
+        `before, open one and deepen it.</p>` +
+        f.roots.map(e => row(e, 'root')).join('')
+      : `<p class="warn">No line has been marked as traced-back yet. When you reach ` +
+        `an ancestor nobody can go past, open their card and mark them ` +
+        `<b>Furthest we can trace</b> — it tells the next person where the work ended ` +
+        `rather than leaving them to guess.</p>`) +
+
+    (f.open.length
+      ? `<p class="lbl" style="margin-top:14px;">Open ends — nobody has said yet</p>` +
+        `<p class="covnote">These have no parents recorded and no one has marked them ` +
+        `as the end. Each is a question somebody in the family may be able to answer.</p>` +
+        f.open.map(e => row(e, 'open')).join('')
+      : '') +
+
+    `<p class="covnote" style="margin-top:14px;">` +
+      `<b>${f.roots.length}</b> rooted · <b>${f.open.length}</b> open · ` +
+      `<b>${people().length}</b> in the tree</p>` +
+    `<div class="row"><button class="btn" id="rNo">Done</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  el.querySelectorAll('[data-goto]').forEach(b => b.onclick = () => {
+    const id = b.dataset.goto;
+    closeForm();
+    sel = id;
+    render();
+    bringIntoView(id);
+    revealBuds();
+  });
+  $('rNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
 /* The calculator panel. */
 let kinA = null, kinB = null;
 
@@ -2668,6 +2795,11 @@ function openCard(id){
     `<input id="cTotem" class="fld" value="${esc(p.totem || '')}" placeholder="Totem / mutupo" autocomplete="off">` +
     `<button class="btn ghost wide${p.root ? ' on' : ''}" id="cRoot">` +
       `${p.root ? '● ' : ''}Furthest we can trace</button>` +
+    `<p class="roothint">${p.root
+      ? 'Marked as the end of this line. Anyone who can go further can lift it ' +
+        'from the tree itself.'
+      : 'Mark this if nobody can go back past them — it tells the next person ' +
+        'the work ended here rather than leaving them to guess.'}</p>` +
     `<button class="btn ghost wide${meId === id ? ' on' : ''}" id="cMe">` +
       `${meId === id ? '● This is you' : 'This is me'}</button>` +
     `<div class="row"><button class="btn" id="cSave">Save</button>` +
@@ -3112,7 +3244,18 @@ budsEl.addEventListener('click', e => {
   const ribbon = e.target.closest('.term');
   if (ribbon){ openCard(ribbon.dataset.card); return; }
   const bud = e.target.closest('.bud');
-  if (bud) openForm(bud.dataset.bud, bud.dataset.anchor);
+  if (!bud) return;
+  if (bud.dataset.bud === 'deepen'){
+    // Lift the root and immediately ask for the parent — the whole point of
+    // the button is that somebody has found a way further back.
+    const id = bud.dataset.anchor;
+    toggleRoot(id);
+    render(); save();
+    say(`${state.people[id].name} is no longer the end of the line. Add whoever came before.`);
+    openForm('parent', id);
+    return;
+  }
+  openForm(bud.dataset.bud, bud.dataset.anchor);
 });
 budsEl.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' '){
@@ -3242,6 +3385,7 @@ $('who').onclick = () => {
 $('dupes').onclick = openDuplicates;
 $('theme').onclick = cycleTheme;
 $('kin').onclick = openKinship;
+$('roots').onclick = openRoots;
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {

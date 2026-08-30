@@ -110,6 +110,7 @@ function loadFrontend(){
       nameSimilarity, mustBeDifferent, birthYear, parentUnionOf, partnersOf,
       relationship, kinTerms, kinPath, overlaps, grow, addPerson, addUnion,
       teachTerm, forgetTerm, lexicon,
+      frontier, isOpenEnd, descendantsOf, toggleRoot,
       setState(s){ state = s; }, getState(){ return state; }
     };`, sandbox);
   if (typeof sandbox.api.sameness !== 'function'){
