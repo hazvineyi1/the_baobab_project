@@ -370,6 +370,53 @@ const HANDLERS = {
     return { shape };
   },
 
+  /* Take somebody out of the tree everybody sees, without destroying them.
+     This is the ONLY way a person leaves the visible tree. There is no
+     delete, here or anywhere else in this API.
+
+     The reason is required, and required twice over: the database CHECK
+     refuses a set-aside without one, and this refuses it before the database
+     has to, so the caller gets a sentence rather than a constraint name. The
+     person who entered this record is owed an explanation, and the reason is
+     what the notice they see is made of. */
+  async setAside(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const id = resolve(op.id, 'setAside.id');
+    const why = (op.why ?? '').trim();
+    if (!why) {
+      throw badRequest('setAside: a reason is required — whoever recorded this person is told why');
+    }
+    const person = await checkVersion(client, 'people', id, op.expect, 'person');
+    // Already aside is not an error, but it must not quietly rewrite the
+    // reason and the name attached to the first one. That first notice is
+    // what its author was told; overwriting it would edit their history.
+    if (person.aside_at) return { id, alreadyAside: true };
+
+    await client.query(
+      `UPDATE people SET aside_at = clock_timestamp(), aside_by = $2, aside_why = $3
+        WHERE id = $1`, [id, actor || '', why]);
+    await logChange(client, treeId, 'person', id, 'setAside',
+                    { id, why, addedBy: person.added_by }, actor);
+    return { id, why, notify: person.added_by };
+  },
+
+  /* Bring somebody back into the visible tree. Deliberately open to anyone,
+     and deliberately needs no reason: putting a record back is not the act
+     that needs justifying. */
+  async restore(ctx, op) {
+    const { client, treeId, actor, resolve } = ctx;
+    const id = resolve(op.id, 'restore.id');
+    const person = await checkVersion(client, 'people', id, op.expect, 'person');
+    if (!person.aside_at) return { id, alreadyPresent: true };
+
+    await client.query(
+      `UPDATE people SET aside_at = NULL, aside_by = '', aside_why = '', merged_into = NULL
+        WHERE id = $1`, [id]);
+    await logChange(client, treeId, 'person', id, 'restore',
+                    { id, wasAsideBy: person.aside_by, wasWhy: person.aside_why }, actor);
+    return { id };
+  },
+
   async mergePeople(ctx, op) {
     const { client, treeId, actor, resolve } = ctx;
     const keepId = resolve(op.keepId, 'mergePeople.keepId');
@@ -447,7 +494,17 @@ const HANDLERS = {
          ON CONFLICT DO NOTHING`, [treeId, a, b, actor || '']);
     }
 
-    await client.query('DELETE FROM people WHERE id = $1', [mergeId]);
+    // The folded record is SET ASIDE, not deleted. It keeps its name, its
+    // dates and whoever entered it, and merged_into says where its details
+    // went — so a merge somebody disagrees with can be read back and undone,
+    // rather than only discovered as an absence.
+    await client.query(
+      `UPDATE people
+          SET aside_at = clock_timestamp(), aside_by = $2,
+              aside_why = $3, merged_into = $4
+        WHERE id = $1`,
+      [mergeId, actor || '',
+       `Folded into ${keep.name || 'another record'} as the same person.`, keepId]);
 
     // Merging two records for one person can leave two unions with an
     // identical partner set — the same marriage, recorded twice. Fold them

@@ -119,10 +119,21 @@ const { findDuplicates, nameSimilarity, WEIGHTS, THRESHOLD } = require('../db/du
         mergePair?.why.some(w => /same children|same parents/.test(w)),
         JSON.stringify(mergePair?.why));
 
-  const beforeCount = (await pool.query('SELECT count(*)::int n FROM people WHERE tree_id=$1', [tree])).rows[0].n;
+  const countAll = async () => (await pool.query(
+    'SELECT count(*)::int n FROM people WHERE tree_id=$1', [tree])).rows[0].n;
+  const countLive = async () => (await pool.query(
+    'SELECT count(*)::int n FROM people WHERE tree_id=$1 AND aside_at IS NULL', [tree])).rows[0].n;
+
+  const beforeAll = await countAll(), beforeLive = await countLive();
   await ops([{ op: 'mergePeople', keepId: id('dad'), mergeId: m.refs['$dup2'] }]);
-  const afterCount = (await pool.query('SELECT count(*)::int n FROM people WHERE tree_id=$1', [tree])).rows[0].n;
-  eq('the merged record is gone', afterCount, beforeCount - 1);
+  // A merge takes the folded record out of the tree without destroying it:
+  // one fewer person visible, and not one fewer row. Losing the row would
+  // mean a merge nobody agreed with could not be undone.
+  eq('the merged record leaves the visible tree', await countLive(), beforeLive - 1);
+  eq('but the row is still there',                await countAll(),  beforeAll);
+  eq('marked as folded into the survivor',
+     (await pool.query('SELECT merged_into FROM people WHERE id=$1',
+                       [m.refs['$dup2']])).rows[0].merged_into, id('dad'));
   check('the survivor is still there',
         (await pool.query('SELECT 1 FROM people WHERE id=$1', [id('dad')])).rowCount === 1);
   eq('the survivor kept their children',

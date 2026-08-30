@@ -374,7 +374,7 @@ const MAX_BUCKET = 300;
 async function loadTree(pool, treeId){
   const [peopleR, partnersR, childrenR, dismissedR] = await Promise.all([
     pool.query(`SELECT id, name, name_key, sex, totem, born, born_year, is_root
-                  FROM people WHERE tree_id = $1`, [treeId]),
+                  FROM people WHERE tree_id = $1 AND aside_at IS NULL`, [treeId]),
     pool.query(`SELECT up.union_id, up.person_id FROM union_partners up
                   JOIN unions u ON u.id = up.union_id
                  WHERE u.tree_id = $1 ORDER BY up.position`, [treeId]),

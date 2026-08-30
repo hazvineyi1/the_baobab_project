@@ -111,6 +111,8 @@ function loadFrontend(){
       relationship, kinTerms, kinPath, overlaps, grow, addPerson, addUnion,
       teachTerm, forgetTerm, lexicon,
       frontier, isOpenEnd, descendantsOf, toggleRoot,
+      setAside, restore, noticesFor, asidePeople, present, mergePeople, meName,
+      setMe(id){ meId = id; },
       setState(s){ state = s; }, getState(){ return state; }
     };`, sandbox);
   if (typeof sandbox.api.sameness !== 'function'){

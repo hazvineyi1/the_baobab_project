@@ -499,6 +499,14 @@ body{
   font-family:'Karla',sans-serif; font-size:12.5px; font-weight:600;
 }
 #bar button:hover{background:var(--pod-hi); color:var(--ink);}
+/* The Set aside button doubles as the notice that something YOU recorded has
+   been taken out of the tree, so in that state it stops looking like the
+   other quiet buttons beside it. */
+#bar button.notice{
+  color:var(--gold); background:var(--pod-hi);
+  box-shadow:inset 0 0 0 1.5px var(--gold-soft);
+}
+#bar button.notice:hover{color:var(--gold);}
 #bar .tally{
   padding:0 12px 0 10px; color:var(--muted); font-size:12px;
   border-left:1px solid var(--pod-edge); margin-left:4px;
@@ -585,6 +593,7 @@ body{
   <button class="who" id="theme" title="Day, night, or follow this device">Auto</button>
   <button class="who" id="who">You: <b>—</b></button>
   <button class="who" id="roots">Roots</button>
+  <button class="who" id="aside" hidden></button>
   <button class="who" id="kin">Kinship</button>
   <button class="dupes" id="dupes" hidden></button>
   <span class="tally"><b id="count">0</b> in the tree</span>
@@ -643,12 +652,41 @@ const stage = $('stage'), gtree = $('gtree'), podsEl = $('pods');
 
 /* ── model ──────────────────────────────────────────────────────────── */
 const uid = p => p + (state.seq++);
-const people = () => Object.values(state.people);
+const people = () => Object.values(state.people).filter(p => !p.aside);
 const unions = () => Object.values(state.unions);
+
+/* ── set aside, never deleted ────────────────────────────────────────────
+   Nothing recorded about a family is destroyed here. A person can be SET
+   ASIDE — taken out of the tree everybody sees — but their record stays, and
+   anyone can bring them back.
+
+   The reason is that a family tree is filled in by many people over years,
+   and the ordinary case is one relative doubting another's entry. If a doubt
+   could destroy a record, the whole cost of being wrong would fall on
+   whoever entered it — usually the person who knew the most. Making removal
+   reversible moves that cost to nobody.
+
+   `present(id)` is the seam. people() hides set-aside records, so the layout,
+   the duplicate scan, the kinship engine and the count all stop seeing them
+   at once; state.people[id] still resolves, so a set-aside person's name can
+   be shown in a notice or a panel. Anywhere the tree is WALKED, present() is
+   what to ask — a set-aside person is not a path between two people who are
+   still in the tree. */
+const present = id => {
+  const p = state.people[id];
+  return p && !p.aside ? p : null;
+};
 
 const parentUnionOf = id => unions().find(u => u.children.includes(id)) || null;
 const unionsOf = id => unions().filter(u => u.partners.includes(id));
-const partnersOf = id => unionsOf(id).flatMap(u => u.partners.filter(p => p !== id && state.people[p]));
+const partnersOf = id => unionsOf(id).flatMap(u => u.partners.filter(p => p !== id && present(p)));
+
+// Everyone still in the tree, and everyone taken out of it.
+const asidePeople = () => Object.values(state.people).filter(p => p.aside);
+// Who is looking. Self-claimed — you tap your own name — and kept as plain
+// text on each record, so that real accounts can be added later without
+// having to re-attribute anything already entered.
+const meName = () => (meId && state.people[meId] ? state.people[meId].name : '');
 
 // Where somebody sits among their brothers and sisters, eldest first.
 const birthRank = id => {
@@ -664,7 +702,13 @@ function addPerson(name, sex, totem, born, died){
   const id = uid('p');
   state.people[id] = {
     id, name:name.trim(), sex:sex || '', totem:(totem || '').trim(),
-    born:(born || '').trim(), died:(died || '').trim(), root:false
+    born:(born || '').trim(), died:(died || '').trim(), root:false,
+    // Who entered this relative, and when. Self-claimed, and stored as a
+    // plain name so that real accounts can be added later without having to
+    // re-attribute anything already recorded. It is the address every
+    // set-aside notice is sent to: an entry with no author can still be set
+    // aside, it just has nobody to tell.
+    by: meName(), at: new Date().toISOString()
   };
   fresh.add(id);
   return id;
@@ -689,7 +733,7 @@ function isOpenEnd(id){
   const p = state.people[id];
   if (!p || p.root) return false;
   const pu = parentUnionOf(id);
-  return !pu || pu.partners.filter(x => state.people[x]).length === 0;
+  return !pu || pu.partners.filter(x => present(x)).length === 0;
 }
 
 // Everyone below somebody, and how many generations deep the record goes.
@@ -699,7 +743,7 @@ function descendantsOf(id){
   const walk = (who, d) => {
     for (const u of unionsOf(who)){
       for (const kid of u.children){
-        if (!state.people[kid] || seen.has(kid)) continue;
+        if (!present(kid) || seen.has(kid)) continue;
         seen.add(kid);
         if (d + 1 > depth) depth = d + 1;
         walk(kid, d + 1);
@@ -791,17 +835,52 @@ function reorder(id, dir){
   pu.children.splice(to, 0, id);
 }
 
-function removePerson(id){
+/* Take somebody out of the tree everybody sees. This is the only way a person
+   leaves it — there is no delete.
+
+   Note what is NOT touched: their unions. A person set aside has not left
+   their marriage or stopped being their children's parent; they have been
+   taken out of the picture, and the picture is rebuilt without them by
+   computeLayout. Editing the unions here would be the destructive act this
+   whole design exists to avoid — it would lose the fact that they were
+   married, and restoring them could not put it back.
+
+   The reason is required. It is what the person who entered this record will
+   be shown, and it is the difference between a disappearance and a decision. */
+function setAside(id, why){
+  const p = state.people[id];
+  if (!p || p.aside) return false;
+  const reason = String(why || '').trim();
+  if (!reason) return false;
   snapshot();
-  delete state.people[id];
-  for (const u of unions()){
-    u.partners = u.partners.filter(p => p !== id);
-    u.children = u.children.filter(c => c !== id);
-    const pointless = (!u.partners.length && u.children.length < 2) ||
-                      (u.partners.length <= 1 && !u.children.length);
-    if (pointless) delete state.unions[u.id];
-  }
-  if (state.rootId === id) state.rootId = people().length ? people()[0].id : null;
+  p.aside = { by: meName(), at: new Date().toISOString(), why: reason };
+  // The root is a claim about how far the line has been traced. If the person
+  // holding it is set aside, the claim moves to whoever is still in the tree
+  // rather than vanishing with them.
+  if (state.rootId === id) state.rootId = (people()[0] || {}).id || null;
+  return true;
+}
+
+/* Bring somebody back. Deliberately open to anyone and deliberately needs no
+   reason: putting a record back is not the act that needs justifying. */
+function restore(id){
+  const p = state.people[id];
+  if (!p || !p.aside) return false;
+  snapshot();
+  delete p.aside;
+  return true;
+}
+
+/* Entries recorded by one person that somebody has since set aside — the
+   whole notification mechanism. There is no queue and nothing to mark as
+   seen: a notice is the live fact "an entry of yours is currently out of the
+   tree", so it stops being shown exactly when it stops being true. */
+function noticesFor(name){
+  const who = String(name || '').trim().toLowerCase();
+  if (!who) return [];
+  return asidePeople()
+    .filter(p => String(p.by || '').trim().toLowerCase() === who)
+    .sort((a, b) => String(b.aside.at).localeCompare(String(a.aside.at)));
 }
 
 /* ── the same person, entered twice ─────────────────────────────────────
@@ -878,7 +957,7 @@ function positionOf(id){
   if (mates.length) bits.push(`married to ${state.people[mates[0]].name}`);
   const par = parentsOf(id);
   if (par.length) bits.push(`child of ${par.map(x => state.people[x].name).join(' and ')}`);
-  const kids = unionsOf(id).flatMap(u => u.children).filter(k => state.people[k]);
+  const kids = unionsOf(id).flatMap(u => u.children).filter(k => present(k));
   if (kids.length) bits.push(`parent of ${state.people[kids[0]].name}${kids.length > 1 ? ` and ${kids.length - 1} more` : ''}`);
   return bits.slice(0, 2).join(' · ') || 'not connected to anyone yet';
 }
@@ -1022,7 +1101,7 @@ function matchesForName(name, excludeId){
 
 function parentsOf(id){
   const u = parentUnionOf(id);
-  return u ? u.partners.filter(x => state.people[x]) : [];
+  return u ? u.partners.filter(x => present(x)) : [];
 }
 
 /* Everybody above somebody, with how many generations up they sit, plus the
@@ -1053,7 +1132,7 @@ function computeAncestry(id){
       if (!u) continue;
       joins.push({ union:u, child:f.id, up:f.up });
       for (const par of u.partners){
-        if (!state.people[par] || seen.has(par)) continue;
+        if (!present(par) || seen.has(par)) continue;
         seen.add(par);
         up.set(par, f.up + 1);
         next.push({ id:par, up:f.up + 1 });
@@ -1137,6 +1216,11 @@ function forgetTerm(shape){
    named exactly as before. Only where it comes back with no word does the
    family's own lexicon get a say. */
 function relationship(who, tid, byBloodOnly){
+  // Somebody set aside is not in the tree, so they are nothing to anybody in
+  // it. Naming them anyway would put a live kinship term on a record the
+  // family has taken out — the one place a derived term could still be wrong
+  // after everything else stopped storing them.
+  if (!present(who) || !present(tid)) return null;
   const r = derive(who, tid, byBloodOnly);
   if (r && !r.term && r.shape){
     const taught = lexicon()[r.shape];
@@ -1511,7 +1595,16 @@ function mergePeople(keeperId, loserId){
       else u.children = [...new Set(u.children.map(c => c === loserId ? keeperId : c))];
     }
   }
-  delete state.people[loserId];
+  // The folded record is SET ASIDE, not deleted. Its marriages and children
+  // have already moved to the kept record above, so it leaves the picture
+  // either way — but it keeps its name, its dates and whoever entered it, and
+  // says where its details went. A merge somebody disagrees with can then be
+  // read back and undone, rather than only discovered as an absence.
+  loser.aside = {
+    by: meName(), at: new Date().toISOString(),
+    why: `Folded into ${keeper.name || 'another record'} as the same person.`,
+    mergedInto: keeperId
+  };
   for (const u of unions()){
     const dead = !u.partners.length && u.children.length < 2;
     if (dead) delete state.unions[u.id];
@@ -1531,10 +1624,14 @@ function dismissDuplicate(a, b){
 /* ── generations ────────────────────────────────────────────────────── */
 function generations(){
   const g = {};
-  if (!state.rootId || !state.people[state.rootId]) return g;
-  const q = [state.rootId]; g[state.rootId] = 0;
+  // The recorded root may itself have been set aside. Numbering from anybody
+  // still in the tree gives the same relative generations — only the zero
+  // point moves — so the tree keeps its shape instead of collapsing.
+  const start = present(state.rootId) ? state.rootId : (people()[0] || {}).id;
+  if (!start) return g;
+  const q = [start]; g[start] = 0;
   const step = (other, gen) => {
-    if (other && state.people[other] && g[other] === undefined){ g[other] = gen; q.push(other); }
+    if (other && present(other) && g[other] === undefined){ g[other] = gen; q.push(other); }
   };
   while (q.length){
     const id = q.shift(), n = g[id];
@@ -1567,12 +1664,25 @@ function computeLayout(){
   const blocks = [], ofPerson = {};
   const width = b => b.socket ? 112 : b.members.length * POD_W + (b.members.length - 1) * COUPLE_GAP;
 
+  /* The unions as the DRAWN tree sees them: set-aside people are filtered out
+     of every partner and child list first, so nothing below has to remember
+     to check. Read-only copies — the real unions keep every member, because a
+     set-aside person has not left their marriage, only the picture.
+
+     Filtering here rather than dropping the whole union matters: a marriage
+     with one partner set aside is still a marriage, and its children still
+     have to hang off the partner who is left. */
+  const us = unions().map(u => ({
+    id: u.id,
+    partners: u.partners.filter(present),
+    children: u.children.filter(present)
+  }));
+
   // Walk the marriage graph so everybody who married into a row stands in it.
   const adj = {};
-  for (const u of unions()){
+  for (const u of us){
     if (u.partners.length !== 2) continue;
     const [x, y] = u.partners;
-    if (!state.people[x] || !state.people[y]) continue;
     (adj[x] = adj[x] || []).push(y);
     (adj[y] = adj[y] || []).push(x);
   }
@@ -1601,7 +1711,7 @@ function computeLayout(){
 
   // Which marriages belong to which row, in the order they sit along it.
   for (const b of blocks){
-    b.unions = unions()
+    b.unions = us
       .filter(u => u.partners.length && u.partners.every(pp => b.members.includes(pp)))
       .sort((u1, u2) => Math.min(...u1.partners.map(x => b.members.indexOf(x))) -
                         Math.min(...u2.partners.map(x => b.members.indexOf(x))));
@@ -1619,7 +1729,7 @@ function computeLayout(){
   }
   // Siblings whose parents nobody has named yet: stand an empty socket in
   // their place so they hang together and the gap is visible.
-  for (const u of unions()){
+  for (const u of us){
     if (u.partners.length) continue;
     const kids = u.children.map(c => ofPerson[c]).filter(Boolean).filter(k => !k.parent);
     if (!kids.length) continue;
@@ -1765,7 +1875,7 @@ function render(){
       (sel === p.id ? ordControls(p.id) : '') +
       (sel === p.id ? `<span class="rm" data-card="${p.id}" role="button" tabindex="0"` +
         ` aria-label="Details for ${esc(p.name)}" style="left:-9px;right:auto;">⋯</span>` : '') +
-      (sel === p.id ? `<span class="rm" data-rm="${p.id}" role="button" tabindex="0" aria-label="Remove ${esc(p.name)}">✕</span>` : '') +
+      (sel === p.id ? `<span class="rm" data-rm="${p.id}" role="button" tabindex="0" aria-label="Set ${esc(p.name)} aside — nothing is deleted">✕</span>` : '') +
       `</div>`);
   }
   podsEl.innerHTML = html.join('');
@@ -1776,9 +1886,25 @@ function render(){
   const chip = $('dupes');
   chip.hidden = !likely.length;
   chip.textContent = likely.length === 1 ? '1 possible duplicate' : `${likely.length} possible duplicates`;
-  $('bar').hidden = !people().length;
-  $('hint').hidden = people().length === 0 || people().length > 4;
-  $('seed').hidden = !!people().length;
+  // Not `people().length`: if everybody has been set aside the bar is the only
+  // way back to their records, and hiding it would make a reversible act
+  // unreversible.
+  $('bar').hidden = !people().length && !asidePeople().length;
+  // An empty tree is not the same as a tree everyone has been set aside from.
+  // The welcome screen sits above everything, so showing it in the second case
+  // would cover the one panel that can bring those records back — turning a
+  // reversible act into an unreversible one at the last step.
+  const emptied = !people().length && asidePeople().length > 0;
+  $('seed').hidden = !!people().length || emptied;
+  $('hint').hidden = (!people().length && !emptied) || people().length > 4;
+  if (emptied){
+    $('hint').innerHTML =
+      `Everyone is set aside. Nothing was deleted — open <b>${asidePeople().length} ` +
+      `set aside</b> in the bar to put anybody back.`;
+  } else if (people().length){
+    $('hint').innerHTML = 'Tap anyone to see where the tree can grow.<br>' +
+      '<b>Roots</b> run down into the soil, <b>branches</b> reach up.';
+  }
   fresh.clear();
   applyTransform();
 }
@@ -2531,6 +2657,147 @@ function openDuplicates(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
+/* Everyone currently out of the tree, and how to bring them back.
+ 
+   Two lists, and the order is the point. Entries YOU recorded that somebody
+   else set aside come first: that is the notice this whole design exists to
+   deliver, and it should not be something you have to go looking for. The
+   rest of the tree's set-aside records follow, open to anyone, because a
+   record only one person can recover is a record one person can lose. */
+function openAside(){
+  closeForm();
+  const all = asidePeople().sort((a, b) => String(b.aside.at).localeCompare(String(a.aside.at)));
+  const mine = noticesFor(meName());
+  const mineIds = new Set(mine.map(p => p.id));
+  const rest = all.filter(p => !mineIds.has(p.id));
+  pending = { kind:'dupes', anchorId: sel || state.rootId };
+
+  const when = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+  };
+  const row = p => {
+    const a = p.aside;
+    const into = a.mergedInto && state.people[a.mergedInto];
+    return `<button type="button" class="askrow" data-back="${p.id}">` +
+      `<u>${esc(p.name)}${p.born ? ` <small style="display:inline">b. ${esc(p.born)}</small>` : ''}` +
+        `<small>${esc(a.why)}</small>` +
+        `<small>Set aside${a.by ? ` by ${esc(a.by)}` : ''}${when(a.at) ? ` · ${when(a.at)}` : ''}` +
+          `${into ? ` · details went to ${esc(into.name)}` : ''}` +
+          `${p.by ? ` · recorded by ${esc(p.by)}` : ''}</small></u>` +
+      `<em>put back</em></button>`;
+  };
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.className = 'wide';
+  el.innerHTML =
+    `<p class="cap">Set aside</p>` +
+    `<p class="covnote">Nothing here has been deleted. Anyone can put any of ` +
+      `it back, at any time.</p>` +
+
+    (mine.length
+      ? `<p class="lbl" style="margin-top:12px;">Yours — somebody took these out of the tree</p>` +
+        mine.map(row).join('')
+      : '') +
+
+    (rest.length
+      ? `<p class="lbl" style="margin-top:${mine.length ? 14 : 12}px;">` +
+        `${mine.length ? 'Everything else' : 'Currently out of the tree'}</p>` +
+        rest.map(row).join('')
+      : '') +
+
+    (all.length
+      ? `<p class="covnote" style="margin-top:14px;"><b>${all.length}</b> set aside · ` +
+        `<b>${people().length}</b> in the tree</p>`
+      : `<p class="covnote">Nobody has been set aside. Everything anyone has ` +
+        `recorded is in the tree.</p>`) +
+
+    `<div class="row"><button class="btn" id="asNo">Done</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+
+  el.querySelectorAll('[data-back]').forEach(b => b.onclick = () => {
+    const id = b.dataset.back;
+    const name = state.people[id].name;
+    restore(id);
+    closeForm(); sel = id; render(); save();
+    bringIntoView(id); revealBuds();
+    say(`${name} is back in the tree.`);
+  });
+  $('asNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
+/* Taking somebody out of the tree.
+ 
+   A browser confirm() used to do this, and it was wrong twice over. It
+   destroyed the record, and it asked a yes/no question when the thing that
+   actually matters is the answer to "why" — because that answer is what the
+   person who entered the record will be shown. So the reason is the form, and
+   there is no way past it.
+ 
+   It also says out loud what will and will not happen, because "remove" reads
+   as deletion to everybody and this is not deletion. */
+function openSetAside(id){
+  const p = state.people[id];
+  if (!p || p.aside) return;
+  closeForm();
+  pending = { kind:'dupes', anchorId:id };
+
+  const below = descendantsOf(id);
+  const author = String(p.by || '').trim();
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.innerHTML =
+    `<p class="cap">Set aside <b>${esc(p.name)}</b></p>` +
+    `<p class="covnote">They come out of the tree everybody sees. Nothing is ` +
+      `deleted — the record stays, and anyone can put them back.</p>` +
+
+    (author
+      ? `<p class="covnote"><b>${esc(author)}</b> recorded them, and will see ` +
+        `this and your reason.</p>`
+      : `<p class="covnote">Nobody is recorded as having entered them, so there ` +
+        `is no one to tell.</p>`) +
+
+    (below.count
+      ? `<p class="warn">${below.count} ${below.count === 1 ? 'person' : 'people'} ` +
+        `recorded below them will lose their link to this part of the tree until ` +
+        `${esc(p.name)} is put back. Nobody below is set aside.</p>`
+      : '') +
+
+    `<p class="lbl">Why</p>` +
+    `<input id="saWhy" class="fld" autocomplete="off" ` +
+      `placeholder="Entered twice, wrong person, not actually family…">` +
+    `<p class="roothint">Required. This is the whole of what ` +
+      `${author ? esc(author) : 'the family'} will be told.</p>` +
+    `<div class="row"><button class="btn" id="saGo">Set aside</button>` +
+    `<button class="btn ghost" id="saNo">Cancel</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+  $('saWhy').focus();
+
+  const go = () => {
+    const why = $('saWhy').value.trim();
+    if (!why){
+      $('saWhy').focus();
+      say('A reason is needed before anyone can be set aside.');
+      return;
+    }
+    setAside(id, why);
+    sel = null; closeForm(); render(); save();
+    say(`${p.name} set aside. ${author ? author + ' will see why.' : ''} ` +
+        `Nothing was deleted — Set aside in the bar brings them back.`);
+  };
+  $('saGo').onclick = go;
+  $('saNo').onclick = closeForm;
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); go(); }
+    if (e.key === 'Escape'){ e.preventDefault(); closeForm(); }
+  });
+}
+
 /* Where the tree ends, and where it could still grow.
  
    The point of this project is that everybody records their own family and the
@@ -2958,15 +3225,19 @@ function openForm(kind, anchorId){
 
 function placeForm(el){
   const at = layout.persons[pending.anchorId];
-  if (!at) return;
   const off = { parent:[0,190], sibling:[-230,0], partner:[230,0], child:[0,-190],
                 card:[0,0], dupes:[0,0] }[pending.kind] || [0, 0];
   // offsetWidth/Height, not getBoundingClientRect — the form is mid-animation
   // when it is first placed, and the rect would report its scaled-down size.
   const halfW = (el.offsetWidth || 252) / 2, halfH = (el.offsetHeight || 300) / 2;
   const padX = halfW + 12, padTop = halfH + 12, padBot = halfH + 88;   // clear the toolbar
-  let x = at.x * pos.k + pos.x + off[0];
-  let y = at.y * pos.k + pos.y + off[1];
+  // A panel can be opened with nobody selected — the Set aside list after
+  // everyone has been set aside is exactly that case. Falling back to the
+  // middle of the screen keeps it reachable; returning early used to leave it
+  // unpositioned and half off the top-left corner, which made a reversible
+  // act look unreversible.
+  let x = at ? at.x * pos.k + pos.x + off[0] : innerWidth / 2;
+  let y = at ? at.y * pos.k + pos.y + off[1] : innerHeight / 2;
   x = Math.max(padX, Math.min(Math.max(padX, innerWidth - padX), x));
   y = Math.max(padTop, Math.min(Math.max(padTop, innerHeight - padBot), y));
   el.style.left = x + 'px';
@@ -3235,7 +3506,29 @@ function setMe(id){
   if (id) say(`${state.people[id].name} is you. Tap anyone to see what they are to you.`);
 }
 
+/* The Set aside button, which is also the notice. It stays hidden while
+   nothing is set aside — an empty panel is not worth a permanent button — and
+   calls out entries of YOURS that somebody took out, because that is the one
+   thing here you should not have to go looking for. */
+function updateAside(){
+  const btn = $('aside');
+  if (!btn) return;
+  const all = asidePeople().length;
+  const mine = noticesFor(meName()).length;
+  btn.hidden = !all;
+  if (!all) return;
+  btn.classList.toggle('notice', mine > 0);
+  btn.innerHTML = mine
+    ? `<b>${mine}</b> of yours set aside`
+    : `Set aside <b>${all}</b>`;
+  btn.title = mine
+    ? `${mine} ${mine === 1 ? 'entry' : 'entries'} you recorded ${mine === 1 ? 'has' : 'have'} ` +
+      `been taken out of the tree. Tap to see why, and to put ${mine === 1 ? 'it' : 'them'} back.`
+    : `${all} ${all === 1 ? 'record is' : 'records are'} out of the tree. Nothing is deleted.`;
+}
+
 function updateWho(){
+  updateAside();
   const btn = $('who');
   if (!btn) return;
   const p = meId && state.people[meId];
@@ -3308,13 +3601,7 @@ podsEl.addEventListener('click', e => {
     return;
   }
   const rm = e.target.closest('.rm');
-  if (rm){
-    const p = state.people[rm.dataset.rm];
-    if (p && confirm(`Remove ${p.name} from the tree?`)){
-      removePerson(p.id); sel = null; closeForm(); render(); save();
-    }
-    return;
-  }
+  if (rm){ openSetAside(rm.dataset.rm); return; }
   const socket = e.target.closest('.socket');
   if (socket){ openForm('parent', socket.dataset.socket); return; }
 
@@ -3417,6 +3704,7 @@ $('roots').onclick = openRoots;
 // unable to save, so the tree it holds may be behind whatever else has
 // been recorded since. Starting clean is the honest recovery.
 $('stalledGo').onclick = () => location.reload();
+$('aside').onclick = openAside;
 
 $('fit').onclick = fit;
 $('undo').onclick = () => {
@@ -3425,10 +3713,26 @@ $('undo').onclick = () => {
   sel = null; closeForm(); render(); save();
 };
 $('clear').onclick = () => {
-  if (!confirm('Clear the whole tree and start again?')) return;
+  // This used to replace the whole tree with an empty one behind a single
+  // browser confirm — on a tree many relatives are filling in together, one
+  // mis-tap from erasing all of it. Under "nothing is ever deleted" it cannot
+  // do that, so it does the honest version of what it promises: everyone goes
+  // out of the visible tree, every record stays, and Set aside puts any of
+  // them back.
+  if (!people().length) return;
+  const n = people().length;
+  if (!confirm(
+      `Start again with an empty tree?\n\n` +
+      `All ${n} ${n === 1 ? 'person' : 'people'} will be set aside — taken out of ` +
+      `the tree everybody sees. Nothing is deleted: every record stays, and ` +
+      `anyone can put them back from Set aside.`)) return;
   snapshot();
-  state = { people:{}, unions:{}, rootId:null, seq:1 };
+  const why = `Set aside${meName() ? ' by ' + meName() : ''} when the tree was started again.`;
+  const at = new Date().toISOString();
+  for (const p of people()) p.aside = { by: meName(), at, why };
+  state.rootId = null;
   sel = null; closeForm(); render(); save();
+  say(`${n} ${n === 1 ? 'person' : 'people'} set aside. Nothing was deleted.`);
 };
 
 $('seedGo').onclick = plant;

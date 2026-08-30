@@ -62,6 +62,27 @@ function normalise(parsed, shape) {
   return normaliseLegacy(parsed);
 }
 
+/* A set-aside person, or null. Nothing is ever deleted, so somebody taken out
+   of the visible tree still has a full record here and must arrive in Postgres
+   still set aside — migrating them back into the tree would undo a decision
+   the family made, silently.
+
+   The reason is what the person who recorded them was told, so it travels
+   with them. If a blob somehow carries a set-aside with no reason (only
+   possible from hand-edited data — the app cannot produce one), a placeholder
+   keeps the CHECK satisfied rather than dropping the record or the state. */
+function asideOf(p) {
+  const a = p && p.aside;
+  if (!a) return null;
+  const why = String(a.why ?? '').trim();
+  return {
+    at: a.at ?? null,
+    by: String(a.by ?? ''),
+    why: why || 'Set aside before a reason was recorded.',
+    mergedInto: a.mergedInto != null ? String(a.mergedInto) : null
+  };
+}
+
 function normaliseBaobab(parsed) {
   const people = Object.values(parsed.people || {}).map(p => ({
     legacyId: String(p.id),
@@ -70,8 +91,12 @@ function normaliseBaobab(parsed) {
     totem: p.totem ?? '',
     born: p.born ?? '',
     died: p.died ?? '',
-    addedBy: p.addedBy ?? '',
-    isRoot: !!p.root || String(p.id) === String(parsed.rootId ?? '')
+    // Who recorded this person. The blob writes it as `by`; the very oldest
+    // records used `addedBy`. Both are read, because dropping it would lose
+    // the address every set-aside notice is sent to.
+    addedBy: p.by ?? p.addedBy ?? '',
+    isRoot: !!p.root || String(p.id) === String(parsed.rootId ?? ''),
+    aside: asideOf(p)
   }));
 
   const unions = Object.values(parsed.unions || {}).map(u => ({
@@ -103,8 +128,9 @@ function normaliseLegacy(parsed) {
     totem: p.totem ?? '',
     born: p.born ?? '',
     died: p.died ?? '',
-    addedBy: p.addedBy ?? '',
-    isRoot: false
+    addedBy: p.by ?? p.addedBy ?? '',
+    isRoot: false,
+    aside: asideOf(p)
   }));
 
   // One union per distinct parent pair. A person with only a father recorded
@@ -201,15 +227,32 @@ async function loadInto(client, treeId, data) {
   const idOf = new Map();
   for (const p of data.people) {
     const { rows } = await client.query(`
-      INSERT INTO people (tree_id, legacy_id, name, sex, totem, born, died, added_by, is_root)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      INSERT INTO people (tree_id, legacy_id, name, sex, totem, born, died, added_by, is_root,
+                          aside_at, aside_by, aside_why)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       ON CONFLICT (tree_id, legacy_id) DO UPDATE SET
         name = EXCLUDED.name, sex = EXCLUDED.sex, totem = EXCLUDED.totem,
         born = EXCLUDED.born, died = EXCLUDED.died,
-        added_by = EXCLUDED.added_by, is_root = EXCLUDED.is_root
+        added_by = EXCLUDED.added_by, is_root = EXCLUDED.is_root,
+        aside_at = EXCLUDED.aside_at, aside_by = EXCLUDED.aside_by,
+        aside_why = EXCLUDED.aside_why
       RETURNING id`,
-      [treeId, p.legacyId, p.name, p.sex, p.totem, p.born, p.died, p.addedBy, p.isRoot]);
+      [treeId, p.legacyId, p.name, p.sex, p.totem, p.born, p.died, p.addedBy, p.isRoot,
+       p.aside ? (p.aside.at || new Date().toISOString()) : null,
+       p.aside ? p.aside.by : '',
+       p.aside ? p.aside.why : '']);
     idOf.set(p.legacyId, rows[0].id);
+  }
+
+  // merged_into points at another person, so it can only be resolved once
+  // every person has an id. A pointer to somebody who is not in the blob is
+  // dropped rather than faked: the set-aside itself still stands, it just
+  // loses the note about where the details went.
+  for (const p of data.people) {
+    const into = p.aside && p.aside.mergedInto ? idOf.get(p.aside.mergedInto) : null;
+    if (!into) continue;
+    await client.query('UPDATE people SET merged_into = $1 WHERE id = $2',
+                       [into, idOf.get(p.legacyId)]);
   }
 
   const unionIdOf = new Map();

@@ -5,7 +5,7 @@
 
 const express = require('express');
 const { applyOps } = require('../db/ops');
-const { bootstrap, changesSince, search } = require('../db/reads');
+const { bootstrap, changesSince, search, setAsideList } = require('../db/reads');
 const { findDuplicates } = require('../db/duplicates');
 const { OpError } = require('../db/errors');
 
@@ -108,6 +108,20 @@ module.exports = function treeRoutes(pool) {
         threshold: req.query.threshold ? Number(req.query.threshold) : undefined,
         limit: req.query.limit ? Number(req.query.limit) : undefined
       }));
+    } catch (e) { sendError(res, e); }
+  });
+
+  /* Who is currently set aside — the whole of it with no query, or just the
+     entries one person recorded when ?recordedBy= is given.
+
+     ?recordedBy=<name> is the notice feed: "entries of yours that somebody
+     has taken out of the tree, and why". It is a plain read of live state, so
+     it is always current and never needs marking as seen. */
+  r.get('/tree/:id/set-aside', async (req, res) => {
+    try {
+      const recordedBy = req.query.recordedBy;
+      res.json(await setAsideList(pool, req.params.id,
+        recordedBy === undefined ? {} : { recordedBy: String(recordedBy) }));
     } catch (e) { sendError(res, e); }
   });
 

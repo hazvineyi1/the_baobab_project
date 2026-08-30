@@ -8,7 +8,14 @@
 const { badRequest, notFound } = require('./errors');
 
 const PERSON_COLS = `id, name, sex, totem, born, born_year, died, is_root,
-                     added_by, created_at, updated_at`;
+                     added_by, aside_at, aside_by, aside_why, merged_into,
+                     created_at, updated_at`;
+
+// Set-aside people are out of the tree everybody sees. They are never deleted,
+// so every read of the visible tree has to say so explicitly — a query that
+// forgets this clause is how a folded duplicate reappears as a duplicate of
+// the record it was folded into.
+const PRESENT = 'aside_at IS NULL';
 
 // ---------------------------------------------------------------------------
 // bootstrap: the neighbourhood around one person.
@@ -30,7 +37,7 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
   let focusId = focus;
   if (!focusId) {
     const { rows } = await pool.query(
-      `SELECT id FROM people WHERE tree_id = $1
+      `SELECT id FROM people WHERE tree_id = $1 AND ${PRESENT}
         ORDER BY is_root DESC, born_year ASC NULLS LAST, created_at ASC LIMIT 1`, [treeId]);
     if (!rows.length) return emptyResult(treeId, await headSeq(pool, treeId));
     focusId = rows[0].id;
@@ -53,6 +60,7 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
               UNION ALL
               SELECT person_id, union_id FROM union_children) other
           ON other.union_id = mine.union_id
+        JOIN people op ON op.id = other.person_id AND op.aside_at IS NULL
        WHERE nb.depth < $2
     )
     SELECT person_id, min(depth) AS depth FROM nb GROUP BY person_id`,
@@ -62,7 +70,8 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
   if (!ids.length) {
     // A person with no links at all is still a valid tree of one.
     const { rows } = await pool.query(
-      `SELECT ${PERSON_COLS} FROM people WHERE id = $1 AND tree_id = $2`, [focusId, treeId]);
+      `SELECT ${PERSON_COLS} FROM people WHERE id = $1 AND tree_id = $2 AND ${PRESENT}`,
+      [focusId, treeId]);
     return { ...emptyResult(treeId, await headSeq(pool, treeId)), focus: focusId,
              people: rows, depth: d };
   }
@@ -70,7 +79,8 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
   const depthOf = Object.fromEntries(reached.map(r => [r.person_id, Number(r.depth)]));
 
   const [people, unions] = await Promise.all([
-    pool.query(`SELECT ${PERSON_COLS} FROM people WHERE tree_id = $1 AND id = ANY($2::uuid[])`,
+    pool.query(`SELECT ${PERSON_COLS} FROM people
+                 WHERE tree_id = $1 AND id = ANY($2::uuid[]) AND ${PRESENT}`,
                [treeId, ids]),
     // Every union touching the neighbourhood, with partners and children in
     // order. Children are eldest-first: that order is the birth order the
@@ -97,9 +107,9 @@ async function bootstrap(pool, treeId, { focus = null, depth = 3 } = {}) {
   const { rows: terms } = await pool.query(
     'SELECT shape, term, note, by, at FROM kin_terms WHERE tree_id = $1', [treeId]);
   const { rows: [{ total }] } = await pool.query(
-    'SELECT count(*)::int AS total FROM people WHERE tree_id = $1', [treeId]);
+    `SELECT count(*)::int AS total FROM people WHERE tree_id = $1 AND ${PRESENT}`, [treeId]);
   const { rows: rootRows } = await pool.query(
-    'SELECT id FROM people WHERE tree_id = $1 AND is_root LIMIT 1', [treeId]);
+    `SELECT id FROM people WHERE tree_id = $1 AND is_root AND ${PRESENT} LIMIT 1`, [treeId]);
 
   return {
     treeId,
@@ -182,6 +192,7 @@ async function search(pool, treeId, q, { limit = 25 } = {}) {
            similarity(name_key, $2) AS score
       FROM people
      WHERE tree_id = $1
+       AND ${PRESENT}
        AND (name_key LIKE $2 || '%' OR similarity(name_key, $2) > 0.3
             -- name_key is empty when a record is nothing but an honorific
             -- ("Baba"). Such a person is not a duplicate candidate, but they
@@ -195,6 +206,7 @@ async function search(pool, treeId, q, { limit = 25 } = {}) {
            0::real AS score
       FROM people
      WHERE tree_id = $1
+       AND ${PRESENT}
        AND (name_key LIKE $2 || '%'
             OR (name_key = '' AND lower(name) LIKE '%' || $2 || '%'))
      ORDER BY exact DESC, born_year ASC NULLS LAST
@@ -267,4 +279,42 @@ async function trigramAvailable(pool) {
   return trgmCache;
 }
 
-module.exports = { bootstrap, changesSince, search, headSeq, familyContext, trigramAvailable };
+/* Who has been set aside, and — when `recordedBy` is given — which of them
+   were entered by that person.
+
+   This is the whole notification mechanism. There is no queue and no
+   acknowledgement flag: a notice is the live fact "an entry of yours is
+   currently set aside", read straight off the rows. It stops being shown when
+   it stops being true — because the record was restored, or because the
+   person who entered it agreed and left it aside. A stored "seen" flag would
+   be a second copy of that truth, free to disagree with the first. */
+async function setAsideList(pool, treeId, { recordedBy } = {}) {
+  const args = [treeId];
+  let filter = '';
+  if (recordedBy !== undefined && recordedBy !== null) {
+    args.push(recordedBy);
+    filter = ` AND p.added_by = $${args.length}`;
+  }
+  const { rows } = await pool.query(`
+    SELECT p.id, p.name, p.born, p.died, p.added_by,
+           p.aside_at, p.aside_by, p.aside_why, p.merged_into,
+           m.name AS merged_into_name
+      FROM people p
+      LEFT JOIN people m ON m.id = p.merged_into
+     WHERE p.tree_id = $1 AND p.aside_at IS NOT NULL${filter}
+     ORDER BY p.aside_at DESC`, args);
+  return {
+    treeId,
+    recordedBy: recordedBy ?? null,
+    total: rows.length,
+    people: rows.map(r => ({
+      id: r.id, name: r.name, born: r.born, died: r.died,
+      addedBy: r.added_by,
+      asideAt: r.aside_at, asideBy: r.aside_by, asideWhy: r.aside_why,
+      mergedInto: r.merged_into, mergedIntoName: r.merged_into_name
+    }))
+  };
+}
+
+module.exports = { bootstrap, changesSince, search, headSeq, familyContext,
+                   trigramAvailable, setAsideList };
