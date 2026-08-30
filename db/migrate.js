@@ -29,6 +29,21 @@ const MIGRATION_LOCK_KEY = 0x6d757469; // "muti"
 async function migrate(pool, log = console.log) {
   const client = await pool.connect();
   try {
+    // Fail loudly rather than hang. A migration that alters a table needs an
+    // ACCESS EXCLUSIVE lock, and Railway starts the new container while the
+    // old one is still serving — so the ALTER can queue behind a connection
+    // that is still reading. With no timeout that wait is unbounded: the boot
+    // produces no output, no error and no listening port, and the deploy looks
+    // indistinguishable from a crash while the schema sits half-applied.
+    //
+    // These are set on this session only, before the advisory lock, so they
+    // cover the wait for the lock as well as the statements after it. A
+    // migration that cannot get its lock inside 15s throws, the transaction
+    // rolls back whole, and the next boot retries it — which is the same
+    // recovery the runner already relies on.
+    await client.query(`SET lock_timeout = '15s'`);
+    await client.query(`SET statement_timeout = '120s'`);
+
     await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
 
     await client.query(`
