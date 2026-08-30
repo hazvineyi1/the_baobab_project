@@ -337,6 +337,17 @@ body{
 #form .relline.none{background:var(--pod-hi); color:var(--ink); border:1.5px dashed var(--pod-edge);}
 #form .relline.none b{color:var(--muted);}
 #form .relline.taught{background:var(--gold); color:var(--pod);}
+#form .relline.also{margin-top:-6px; border-radius:4px 12px 4px 12px; opacity:.92;}
+#form .relline i{font-style:normal; opacity:.8;}
+#form .overlapnote{
+  margin:-4px 0 12px; padding:8px 11px; border-radius:10px;
+  background:var(--pod-hi); border:1px solid var(--pod-edge);
+  font-size:11px; line-height:1.5; color:var(--muted);
+}
+.term b em{
+  font-style:normal; font-size:10px; font-weight:700; vertical-align:super;
+  margin-left:3px; opacity:.75;
+}
 #form .teach{
   margin:-4px 0 10px; padding:10px 11px; border-radius:0 0 12px 12px;
   background:var(--pod-hi); border:1.5px solid var(--pod-edge); border-top:none;
@@ -1197,6 +1208,144 @@ function marriedIn(who, tid){
     };
   }
   return null;
+}
+
+/* ── overlapping terms ──────────────────────────────────────────────────
+   One person is often several things to you at once, and which things depends
+   on whether you are a man or a woman looking. This is not an edge case in
+   Shona — it is the ordinary shape of the system, and an engine that returns a
+   single word for every pair is quietly lying about it.
+ 
+   The overlaps encoded here were given by the family this app is for:
+ 
+     Your father's sister is Tete. If you are a WOMAN she is also a sister to
+     you, and because of that her child is your child. If you are a MAN her
+     child is Muzukuru.
+ 
+     Your mother's brother is Sekuru, to a man and a woman alike, and so are
+     his sons. His DAUGHTERS are not — they are mothers to you.
+ 
+     Your mother's brother's wife is Ambuya. To a man she is also a wife.
+ 
+   The last two are corrections, not additions: the engine returned Sekuru for
+   a mother's brother's daughter, and had no word at all for his wife.
+ 
+   Any of these can be overridden by the family's own lexicon, keyed on the
+   same shapes, because a word chosen here is still this app's guess at how a
+   particular family says it. */
+
+// The structural facts of a link, recomputed rather than read out of the
+// engine, so that engine stays exactly as it was written and tested.
+function kinPath(who, tid){
+  if (!who || !tid || who === tid) return null;
+  const mine = ancestry(who), theirs = ancestry(tid);
+  if (mine.up.has(tid) || theirs.up.has(who)) return null;   // straight line, not a side one
+  let best = null;
+  for (const a of mine.joins) for (const b of theirs.joins){
+    if (a.union.id !== b.union.id || a.child === b.child) continue;
+    const cost = a.up + b.up;
+    if (!best || cost < best.cost) best = { cost, myUp:a.up, tgUp:b.up, myLink:a.child, tgLink:b.child };
+  }
+  if (!best) return null;
+  const myLink = state.people[best.myLink], tgLink = state.people[best.tgLink];
+  if (!myLink || !tgLink) return null;
+  const known = myLink.sex && tgLink.sex;
+  const cross = best.myUp >= 1 && known && myLink.sex !== tgLink.sex;
+  return {
+    myUp: best.myUp, tgUp: best.tgUp, genDiff: best.myUp - best.tgUp, cross,
+    // the two sides of the fork: mine is the ancestor I come down through,
+    // theirs is the one they come down through
+    fathersSister: cross && myLink.sex === 'm' && tgLink.sex === 'f',
+    mothersBrother: cross && myLink.sex === 'f' && tgLink.sex === 'm',
+    myLink: best.myLink, tgLink: best.tgLink
+  };
+}
+
+// Is this person married to my mother's brother?
+function marriedToMyMothersBrother(who, tid){
+  for (const sp of partnersOf(tid)){
+    const p = kinPath(who, sp);
+    if (p && p.mothersBrother && p.genDiff === 1) return sp;
+  }
+  return null;
+}
+
+function overlaps(who, tid){
+  const me = state.people[who], them = state.people[tid];
+  if (!me || !them || who === tid) return [];
+  const p = kinPath(who, tid);
+  const out = [];
+
+  if (p && p.fathersSister && me.sex === 'f'){
+    if (p.genDiff === 1){
+      // She is Tete. To a woman she is also a sister — which is what makes
+      // her children yours in the line below.
+      out.push({
+        shape: 'overlap:fathers-sister:woman-looking:sister',
+        term: 'Mukoma', confirm: true,
+        why: "your father's sister — to a woman she is a sister as well as Tete"
+      });
+    }
+    if (p.genDiff === 0){
+      out.push({
+        shape: `overlap:fathers-sisters-child:woman-looking:${them.sex || 'unknown'}`,
+        term: them.sex === 'f' ? 'Mwanasikana' : them.sex === 'm' ? 'Mwanakomana' : null,
+        why: "your father's sister is a sister to you, so her child is your child"
+      });
+    }
+  }
+
+  if (p && p.mothersBrother && p.genDiff === 0 && them.sex === 'f'){
+    // His sons stay Sekuru; his daughters do not.
+    out.push({
+      shape: 'overlap:mothers-brothers-daughter',
+      term: 'Amai', replaces: true,
+      why: "your mother's brother's daughter — his daughters are mothers to you"
+    });
+  }
+
+  const sekuru = marriedToMyMothersBrother(who, tid);
+  if (sekuru){
+    out.push({
+      shape: 'overlap:mothers-brothers-wife',
+      term: 'Ambuya', replaces: true,
+      why: `married to ${state.people[sekuru].name}, your Sekuru`
+    });
+    if (me.sex === 'm'){
+      out.push({
+        shape: 'overlap:mothers-brothers-wife:man-looking:wife',
+        term: 'Mukadzi', confirm: true,
+        why: 'to a man she is also a wife'
+      });
+    }
+  }
+  return out;
+}
+
+/* Every word that applies, not just the first one found. The family's lexicon
+   can override any of them, including the ones this app supplied itself. */
+function kinTerms(who, tid){
+  const base = relationship(who, tid);
+  if (!base) return null;
+  const over = overlaps(who, tid);
+  const list = [];
+  const push = (term, why, o) => {
+    o = o || {};
+    const taught = o.shape ? lexicon()[o.shape] : null;
+    if (!term && !taught) return;
+    list.push({
+      term: taught ? taught.term : term,
+      why, shape: o.shape || null,
+      taught: !!taught,
+      // a word this app chose rather than was told; shown so it can be corrected
+      confirm: !!o.confirm && !taught
+    });
+  };
+  if (!over.some(o => o.replaces) && (base.term || base.choice)){
+    push(base.term || base.choice, base.why, { shape: base.shape });
+  }
+  for (const o of over) push(o.term, o.why, o);
+  return { list, base, shape: base.shape || null, plain: base.plain || null };
 }
 
 /* Attach somebody already in the tree instead of typing them again. This is
@@ -2304,17 +2453,31 @@ function kinPicker(side, chosen){
 function kinVerdict(from, to){
   if (!from || !to) return '';
   if (from === to) return `<p class="relline"><b>—</b><span>the same person</span></p>`;
-  const r = relationship(from, to);
-  if (!r) return '';
-  const term = r.term || r.choice;
-  const head = `<p class="relline${term ? '' : ' none'}${r.taught ? ' taught' : ''}">` +
-    `<b>${esc(term || 'Not named')}</b>` +
-    `<span>${esc(kinName(to))} is ${esc(kinName(from))}'s ${term ? esc(term) : 'relative'} ` +
-    `— ${esc(r.why)}</span></p>`;
+  const k = kinTerms(from, to);
+  if (!k) return '';
+  const r = k.base;
+  const head = k.list.length
+    // One person is often several things at once. Showing only the first would
+    // hide the shape of the system rather than explain it.
+    ? `<div class="terms">` + k.list.map((t, i) =>
+        `<p class="relline${i ? ' also' : ''}${t.taught ? ' taught' : ''}">` +
+          `<b>${esc(t.term)}${i === 0 && k.list.length > 1 ? '' : ''}</b>` +
+          `<span>${i === 0 ? `${esc(kinName(to))} is ${esc(kinName(from))}'s ` : 'and also '}` +
+          `${esc(t.term)} — ${esc(t.why)}` +
+          `${t.confirm ? ' <i>· this app chose the word; correct it if your family says otherwise</i>' : ''}` +
+          `${t.taught ? ' <i>· taught by your family</i>' : ''}</span>` +
+        `</p>`).join('') +
+      (k.list.length > 1
+        ? `<p class="overlapnote">${esc(kinName(to))} is ${k.list.length} things to ` +
+          `${esc(kinName(from))} at once. That is ordinary here, and it depends on ` +
+          `whether ${esc(kinName(from))} is a man or a woman.</p>` : '') +
+      `</div>`
+    : `<p class="relline none"><b>Not named</b><span>${esc(kinName(to))} is ` +
+      `${esc(kinName(from))}'s relative — ${esc(r.why)}</span></p>`;
 
   // Where the app has a shape but no word for it, ask. This is the whole
   // mechanism: it never guesses, and it never stays ignorant either.
-  if (!r.term && r.shape){
+  if (!k.list.length && r.shape){
     return head +
       `<div class="teach" data-shape="${esc(r.shape)}">` +
         `<p>Shona may have a word for <b>${esc(r.plain || 'this')}</b> that this app ` +
@@ -2326,12 +2489,20 @@ function kinVerdict(from, to){
         `</div>` +
       `</div>`;
   }
-  if (r.taught){
-    const t = lexicon()[r.shape] || {};
-    return head +
-      `<p class="taughtnote">Taught by your family${t.by ? ` (${esc(t.by)})` : ''}` +
-      `${t.at ? ` on ${esc(t.at)}` : ''} · ` +
-      `<button type="button" class="linkbtn" data-forget="${esc(r.shape)}">remove</button></p>`;
+  // Anything this app chose for itself, or was taught, can be corrected here.
+  const editable = k.list.filter(t => t.shape && (t.confirm || t.taught));
+  if (editable.length){
+    return head + editable.map(t =>
+      `<div class="teach" data-shape="${esc(t.shape)}">` +
+        `<p>${t.taught ? `Your family calls this <b>${esc(t.term)}</b>.`
+                       : `This app used <b>${esc(t.term)}</b> here. If your family says ` +
+                         `otherwise, the word you give is the one it will use.`}</p>` +
+        `<div class="row">` +
+          `<input class="fld teachterm" placeholder="The word your family uses" autocomplete="off">` +
+          `<button type="button" class="btn teachgo">${t.taught ? 'Change' : 'Correct'}</button>` +
+          (t.taught ? `<button type="button" class="btn ghost" data-forget="${esc(t.shape)}">Reset</button>` : '') +
+        `</div>` +
+      `</div>`).join('');
   }
   return head;
 }
@@ -2470,9 +2641,14 @@ function openCard(id){
   el.id = 'form';
   el.innerHTML =
     `<p class="cap">${esc(p.name)}</p>` +
-    (rel ? `<p class="lbl">To you</p><p class="relline">` +
-      `<b>${esc(rel.term || rel.choice || '')}</b>` +
-      `<span>${esc(rel.why)}</span></p>` : '') +
+    (rel ? `<p class="lbl">To you</p>` + (() => {
+      const k = kinTerms(meId, id);
+      if (!k || !k.list.length) return `<p class="relline none"><b>Not named</b>` +
+        `<span>${esc(rel.why)}</span></p>`;
+      return k.list.map((t, i) =>
+        `<p class="relline${i ? ' also' : ''}"><b>${esc(t.term)}</b>` +
+        `<span>${i ? 'and also — ' : ''}${esc(t.why)}</span></p>`).join('');
+    })() : '') +
     `<input id="cName" class="fld" value="${esc(p.name)}" placeholder="Name" autocomplete="off">` +
     `<div class="seg" id="cSex">` +
       `<button type="button" data-sex="f" aria-pressed="${p.sex === 'f'}">She</button>` +
@@ -2907,12 +3083,19 @@ function updateWho(){
    produced it, so it can be checked rather than taken on faith. */
 function relationRibbon(spot){
   if (!spot) return '';
-  const r = relationship(meId, sel);
-  if (!r) return '';
-  return `<div class="term${r.term ? '' : ' none'}" data-card="${sel}" role="button" tabindex="0"` +
+  const k = kinTerms(meId, sel);
+  if (!k) return '';
+  const first = k.list[0];
+  // Several words at once is normal here, so the ribbon says how many rather
+  // than picking one and pretending it is the whole answer. Tapping opens the
+  // card, which lists them.
+  const extra = k.list.length - 1;
+  return `<div class="term${first ? '' : ' none'}" data-card="${sel}" role="button" tabindex="0"` +
     ` style="left:${spot[0].toFixed(1)}px; top:${spot[1].toFixed(1)}px">` +
-    `<b>${esc(r.term || r.choice || 'Not named yet')}</b>` +
-    `<span>${esc(r.why)}</span></div>`;
+    `<b>${esc(first ? first.term : (k.base.choice || 'Not named yet'))}` +
+    `${extra > 0 ? `<em>+${extra}</em>` : ''}</b>` +
+    `<span>${esc(first ? first.why : k.base.why)}` +
+    `${extra > 0 ? ` · and ${extra} more` : ''}</span></div>`;
 }
 
 /* ── interaction ────────────────────────────────────────────────────── */

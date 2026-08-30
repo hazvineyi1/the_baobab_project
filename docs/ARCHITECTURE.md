@@ -242,6 +242,31 @@ relative is the one that settles the most. That is the part that improves as
 the family is entered: the rules never change, but the tree's ability to apply
 them grows with every birth year and every link.
 
+### Overlapping terms
+
+One person is often **several things to you at once**, and which things depends
+on whether a man or a woman is looking. This is not an edge case in Shona — it
+is the ordinary shape of the system, and an engine that returns a single word
+per pair is quietly lying about it.
+
+| relationship | a man looking | a woman looking |
+|---|---|---|
+| father's sister | Tete | Tete **and** a sister |
+| father's sister's child | Muzukuru | Muzukuru **and** your child |
+| mother's brother | Sekuru | Sekuru |
+| mother's brother's son | Sekuru | Sekuru |
+| mother's brother's **daughter** | a mother (Amai) | a mother (Amai) |
+| mother's brother's wife | Ambuya **and** a wife | Ambuya |
+
+Two of those are corrections rather than additions: the engine returned *Sekuru*
+for a mother's brother's daughter, and had no word at all for his wife.
+
+The structural facts are recomputed in `kinPath()` rather than read out of
+`relationship()`, so the original engine stays exactly as it was written and
+tested. Every overlapping term carries a shape and can be overridden through
+the same lexicon that teaches unknown words — a word this app *chose* is
+flagged as such and can be corrected in place.
+
 ### Being taught
 
 Where the engine has no word, it describes the relationship and asks. If the
