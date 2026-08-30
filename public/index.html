@@ -10,38 +10,47 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Karla:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
-/* ═══ Dry season: bone sky above, ochre soil below, silver baobab bark ═══ */
+/* ═══ Aged stone above, deep umber below, burnished brass for the accents ═══
+   Pulled away from sand towards stone and umber: the sand read as holiday,
+   and this is a record a family keeps. The accent is antique brass rather
+   than orange, the soil carries real weight at the foot of the page, and the
+   ink is deep enough that names hold their own against it. */
 :root{
-  --sky:#F3EDE1; --sky-far:#E7DECC;
-  --soil:#E3D3B8; --soil-deep:#D5BF9C; --horizon:#BFA47A;
-  --bark:#8A7860; --bark-thin:#A08E76; --root:#B09A76;
-  --pod:#FFFDF7; --pod-edge:#CBBB9E; --pod-hi:#F6F0E2;
-  --ink:#2A2318; --muted:#79705F;
-  --gold:#9C6119; --gold-soft:#C4832F; --leaf:#4C6836;
-  --shadow:0 2px 10px rgba(42,35,24,.13);
-  --lift:0 8px 26px rgba(42,35,24,.22);
+  --sky:#EFEAE0; --sky-far:#DED7C8;
+  --soil:#C6B296; --soil-deep:#A08A6C; --horizon:#8C7452;
+  --bark:#6F5F49; --bark-lit:#8C7C63; --bark-dark:#4E4133;
+  --bark-thin:#8A7A62; --root:#7A6647;
+  --pod:#FCFAF4; --pod-edge:#C3B49A; --pod-hi:#F2ECDE;
+  --ink:#221C13; --muted:#6E6555;
+  --gold:#8A5A16; --gold-soft:#B0812F; --leaf:#3F5A2E;
+  --shadow:0 2px 10px rgba(34,28,19,.14);
+  --lift:0 10px 30px rgba(34,28,19,.24);
 }
+/* Night over the savannah: a deep blue-black sky, soil that goes almost to
+   black underfoot, and brass warm enough to feel lit rather than printed. */
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --sky:#0F1310; --sky-far:#171C15;
-    --soil:#191510; --soil-deep:#0C0A07; --horizon:#4A3D2A;
-    --bark:#8A7A62; --bark-thin:#6B5E4B; --root:#6E5E47;
-    --pod:#1C221A; --pod-edge:#3C4535; --pod-hi:#141A13;
-    --ink:#EFE7D6; --muted:#948D7C;
-    --gold:#D9A441; --gold-soft:#EFC877; --leaf:#92AB78;
-    --shadow:0 2px 10px rgba(0,0,0,.45);
-    --lift:0 8px 26px rgba(0,0,0,.6);
+    --sky:#0B0E13; --sky-far:#141922;
+    --soil:#120E0A; --soil-deep:#070504; --horizon:#4A3A26;
+    --bark:#8B7A5F; --bark-lit:#B0A085; --bark-dark:#5E5140;
+    --bark-thin:#6E6049; --root:#7C6A4E;
+    --pod:#171B22; --pod-edge:#333B47; --pod-hi:#11151B;
+    --ink:#F0EADC; --muted:#95907F;
+    --gold:#D9A441; --gold-soft:#EFC877; --leaf:#8FA875;
+    --shadow:0 2px 12px rgba(0,0,0,.55);
+    --lift:0 10px 32px rgba(0,0,0,.7);
   }
 }
 :root[data-theme="dark"]{
-  --sky:#0F1310; --sky-far:#171C15;
-  --soil:#191510; --soil-deep:#0C0A07; --horizon:#4A3D2A;
-  --bark:#8A7A62; --bark-thin:#6B5E4B; --root:#6E5E47;
-  --pod:#1C221A; --pod-edge:#3C4535; --pod-hi:#141A13;
-  --ink:#EFE7D6; --muted:#948D7C;
-  --gold:#D9A441; --gold-soft:#EFC877; --leaf:#92AB78;
-  --shadow:0 2px 10px rgba(0,0,0,.45);
-  --lift:0 8px 26px rgba(0,0,0,.6);
+  --sky:#0B0E13; --sky-far:#141922;
+  --soil:#120E0A; --soil-deep:#070504; --horizon:#4A3A26;
+  --bark:#8B7A5F; --bark-lit:#B0A085; --bark-dark:#5E5140;
+  --bark-thin:#6E6049; --root:#7C6A4E;
+  --pod:#171B22; --pod-edge:#333B47; --pod-hi:#11151B;
+  --ink:#F0EADC; --muted:#95907F;
+  --gold:#D9A441; --gold-soft:#EFC877; --leaf:#8FA875;
+  --shadow:0 2px 12px rgba(0,0,0,.55);
+  --lift:0 10px 32px rgba(0,0,0,.7);
 }
 
 *{box-sizing:border-box;}
@@ -57,23 +66,61 @@ body{
 #stage{position:fixed; inset:0; cursor:grab; touch-action:none;}
 #stage.dragging{cursor:grabbing;}
 #sky{position:absolute; inset:0; background:linear-gradient(var(--sky-far),var(--sky) 60%);}
+/* Corners fall away very slightly. It is barely perceptible on its own and it
+   is most of what separates a page that feels composed from one that feels
+   flat — it settles the eye in the middle, where the family is. */
+#stage::after{
+  content:''; position:absolute; inset:0; pointer-events:none; z-index:2;
+  background:radial-gradient(ellipse 78% 68% at 50% 46%,
+    transparent 55%, rgba(34,28,19,.10) 100%);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) #stage::after{
+    background:radial-gradient(ellipse 78% 68% at 50% 46%,
+      transparent 48%, rgba(0,0,0,.42) 100%);
+  }
+}
+:root[data-theme="dark"] #stage::after{
+  background:radial-gradient(ellipse 78% 68% at 50% 46%,
+    transparent 48%, rgba(0,0,0,.42) 100%);
+}
 #ground{position:absolute; left:0; right:0; background:linear-gradient(var(--soil),var(--soil-deep));}
 #groundline{position:absolute; left:0; right:0; height:1px; background:var(--horizon); opacity:.6;}
 /* The tree the whole thing is named for, standing a long way behind the
    family. Faint enough to read as texture rather than picture — it should be
    noticed on the second look, not the first. */
 #backdrop{position:absolute; inset:0; overflow:visible; pointer-events:none;}
-.bg-trunk{fill:var(--bark); opacity:.065;}
-.bg-fold{fill:none; stroke:var(--bark); stroke-linecap:round; opacity:.045;}
-.bg-limb{fill:none; stroke:var(--bark); stroke-linecap:round; stroke-linejoin:round; opacity:.065;}
-.bg-root{fill:none; stroke:var(--root); stroke-linecap:round; stroke-linejoin:round; opacity:.08;}
+/* One opacity governs the whole backdrop. Everything inside is drawn at full
+   strength so the light-and-shadow relationships across the trunk survive —
+   fading each part separately is what flattened the first attempt, and left
+   the grain shouting over a trunk that had gone invisible. */
+/* Softened on purpose. A tree this far away is never crisp in a photograph —
+   distance and depth of field take the edges off it — and hard vector edges
+   are what make a generated tree read as a diagram no matter how good the
+   geometry underneath is. This is the cheapest honest step towards looking
+   photographed rather than drawn.
+   
+   Applied to the inner group rather than through an SVG filter: the group is
+   re-transformed on every pan frame, and a filter primitive would re-run the
+   whole graph each time, where a CSS blur composites a cached layer. */
+#bgTree{opacity:.16; filter:blur(2.8px);}
+.bg-trunk{fill:url(#bgBark);}
+.bg-grain{fill:none; stroke:var(--bark-dark); stroke-linecap:round; opacity:.28;}
+/* Subordinate to the mass. Drawn at full strength the limbs became the only
+   thing visible — a set of dark antlers over a pale blob — because bare
+   structure has far more edge per unit of area than a trunk or a crown does.
+   They are meant to be read second, as the architecture inside the shape. */
+.bg-limb{fill:url(#bgLimbGrad); opacity:.5;}
+.bg-haze{fill:url(#bgHazeGrad); opacity:.62;}
+.bg-root{fill:var(--root);}
 .bg-roots{opacity:.35;}                       /* raised as the view descends */
 @media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]) .bg-trunk,
-  :root:not([data-theme="light"]) .bg-limb{opacity:.10;}
+  :root:not([data-theme="light"]) #bgTree{opacity:.26;}
+  /* against a dark ground the grain has to lighten, not darken */
+  :root:not([data-theme="light"]) .bg-grain{stroke:var(--bark-lit); opacity:.22;}
 }
-:root[data-theme="dark"] .bg-trunk,
-:root[data-theme="dark"] .bg-limb{opacity:.10;}
+:root[data-theme="dark"] #bgTree{opacity:.26;}
+:root[data-theme="dark"] .bg-grain{stroke:var(--bark-lit); opacity:.22;}
 
 #canvas{position:absolute; inset:0; overflow:visible;}
 #pods{position:absolute; inset:0;}
@@ -390,7 +437,28 @@ body{
   <div id="sky"></div>
   <div id="ground"></div>
   <div id="groundline"></div>
-  <svg id="backdrop" aria-hidden="true"><g id="bgTree"></g></svg>
+  <svg id="backdrop" aria-hidden="true">
+    <defs>
+      <!-- Light falls across the trunk from the left, as it does in the
+           afternoon photographs: a bright flank, a turn, and a shadowed
+           side. A flat fill is the difference between a shape and a solid. -->
+      <linearGradient id="bgBark" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0"    stop-color="var(--bark-lit)"/>
+        <stop offset="0.34" stop-color="var(--bark)"/>
+        <stop offset="1"    stop-color="var(--bark-dark)"/>
+      </linearGradient>
+      <linearGradient id="bgLimbGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--bark-lit)"/>
+        <stop offset="1" stop-color="var(--bark)"/>
+      </linearGradient>
+      <radialGradient id="bgHazeGrad">
+        <stop offset="0"    stop-color="var(--bark)" stop-opacity="1"/>
+        <stop offset="0.5"  stop-color="var(--bark)" stop-opacity="0.7"/>
+        <stop offset="1"    stop-color="var(--bark)" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <g id="bgTree"></g>
+  </svg>
   <svg id="canvas"><g id="gtree" class="layer"></g></svg>
   <div id="pods" class="layer"></div>
   <div id="buds"></div>
@@ -1494,55 +1562,122 @@ function applyTransform(){
    
    Drawn once at startup, then only transformed — panning must not rebuild it. */
 
-/* A baobab's trunk is the whole point of it: enormous, squat, and fluted like
-   poured wax. The waviness is built into the outline rather than drawn on as
-   interior lines — stripes over a translucent shape read as a barcode, not bark. */
-const BG_TRUNK =
-  'M-272 6C-266-54-252-74-246-102C-240-132-256-150-249-178' +
-  'C-242-206-222-221-213-249C-206-271-192-283-172-290' +
-  'L172-290C192-283 206-271 213-249C222-221 242-206 249-178' +
-  'C256-150 240-132 246-102C252-74 266-54 272 6Z';
+/* ── the baobab behind everything ───────────────────────────────────────
+   The app is named for a tree it should show. This draws one, faintly, behind
+   the family.
 
-// Two folds down the trunk. Bark over bark, so they read as shadow in the
-// flutes rather than as lines drawn on top.
-const BG_FOLDS = [
-  'M-140 0C-130-72-118-150-104-274',
-  'M6 0C10-90 4-186 6-284',
-  'M146 0C134-72 122-150 108-274'
-];
+   Built from photographic reference rather than traced from it — the geometry
+   below is generated, not a copied outline. Three things separate a tree that
+   reads as a photograph from one that reads as a diagram, and all three are
+   deliberate here:
 
-/* One limb and everything that forks off it. The same routine draws the canopy
-   and the roots — a baobab's branches and roots really are hard to tell apart,
-   which is the whole joke of the tree.
-   
-   `pull` bends each generation of root back towards straight down, so the
-   system plunges instead of fanning out and stopping. */
+     VOLUME.  A flat fill has no form. The trunk carries a gradient across it,
+              so one flank catches light and the other falls into shadow, and
+              vertical striations follow the taper the way bark does.
+
+     TAPER.   Real limbs are thick where they leave the trunk and come to a
+              point. Strokes of constant width with round caps are the single
+              biggest tell of a drawing, so every limb here is a filled shape
+              built from two offset curves that converge at the tip.
+
+     IRREGULARITY. Nothing in a tree is evenly spaced or symmetrical. The
+              trunk profile carries fluting and fine noise; limbs wander as
+              they travel rather than running straight to their endpoint.
+
+   None of it uses SVG filters. feTurbulence would give better bark, but the
+   backdrop is transformed on every pan frame and filtered content re-rasterises
+   when it moves — which is exactly the cost you cannot pay on a phone. */
+
+// A polyline smoothed into cubic beziers (Catmull-Rom). Everything below is
+// generated as points and passed through here, so nothing has hand-written
+// curve handles and nothing comes out mechanically regular.
+function bgSmooth(pts, close){
+  if (pts.length < 2) return '';
+  let d = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++){
+    const p0 = pts[i - 1] || pts[i], p1 = pts[i];
+    const p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+    d += `C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)}` +
+         ` ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)}` +
+         ` ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+  }
+  return close ? d + 'Z' : d;
+}
+
+// A limb as a closed shape rather than a stroke: walk the centreline offsetting
+// left and right by a width that shrinks to nothing, then come back down the
+// other side. This is what gives a branch a shoulder and a point.
+function bgTaper(pts, w0, w1){
+  const L = [], R = [];
+  for (let i = 0; i < pts.length; i++){
+    const t = i / (pts.length - 1);
+    // eased so the limb keeps its bulk near the trunk and thins late, which is
+    // how a branch actually carries its load
+    const w = (w0 + (w1 - w0) * Math.pow(t, 0.7)) / 2;
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len * w, ny = dx / len * w;
+    L.push([pts[i][0] + nx, pts[i][1] + ny]);
+    R.push([pts[i][0] - nx, pts[i][1] - ny]);
+  }
+  return bgSmooth(L) + bgSmooth(R.reverse()).replace(/^M/, 'L') + 'Z';
+}
+
+// A limb wanders as it travels. Straight lines between fork points are the
+// other half of why generated trees look drawn.
+function bgRun(rnd, x, y, ang, len, segs, drift){
+  const pts = [[x, y]];
+  let a = ang;
+  for (let i = 0; i < segs; i++){
+    a += (rnd() * 2 - 1) * drift;
+    const r = a * Math.PI / 180, step = len / segs;
+    const p = pts[pts.length - 1];
+    pts.push([p[0] + Math.cos(r) * step, p[1] + Math.sin(r) * step]);
+  }
+  return { pts, ang: a };
+}
+
 function bgGrow(out, rnd, x, y, ang, len, w, depth, spec){
-  if (depth > spec.maxDepth || w < 0.6 || len < 5) return;
-  const r = ang * Math.PI / 180;
-  const ex = x + Math.cos(r) * len, ey = y + Math.sin(r) * len;
-  // Bow each limb off the straight line, alternating side to side, so the
-  // silhouette comes out gnarled instead of looking like a diagram.
-  const perp = r + Math.PI / 2;
-  const bow = spec.curl * len * (0.10 + rnd() * 0.13) * (rnd() < 0.5 ? -1 : 1);
-  const mx = (x + ex) / 2 + Math.cos(perp) * bow;
-  const my = (y + ey) / 2 + Math.sin(perp) * bow;
-  out.push({ depth, w,
-    d: `M${x.toFixed(1)} ${y.toFixed(1)}Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}` });
+  if (depth > spec.maxDepth || w < 0.9 || len < 7) return;
+  const run = bgRun(rnd, x, y, ang, len, 4, spec.drift);
+  const tip = run.pts[run.pts.length - 1];
+  const wEnd = w * spec.taper;
+  out.push({ depth, d: bgTaper(run.pts, w, wEnd) });
 
-  // How a thing branches is what makes it recognisable. A canopy multiplies —
-  // every limb forks into two or three. A root system does the opposite: it
-  // commits to a few taproots that carry on down, throwing off the occasional
-  // lateral. Branching roots like a canopy produces a curtain of parallel
-  // strands that reads as hair, not as a tree.
+  // A canopy multiplies — every limb forks. A root system does the opposite:
+  // it commits to a few taproots that carry on down, throwing off the
+  // occasional lateral. Branching roots like a canopy gives a curtain of
+  // parallel strands that reads as hair, not as a tree.
   const kids = depth < spec.forkUntil ? (depth < 2 ? 3 : 2) : (rnd() < 0.3 ? 2 : 1);
   for (let i = 0; i < kids; i++){
-    let a = ang + (kids > 1 ? (i - (kids - 1) / 2) * spec.spread : 0)
-                + (rnd() * 2 - 1) * spec.spread * (kids > 1 ? 0.4 : 0.7);
+    let a = run.ang + (kids > 1 ? (i - (kids - 1) / 2) * spec.spread : 0)
+                    + (rnd() * 2 - 1) * spec.spread * (kids > 1 ? 0.4 : 0.7);
     if (spec.pull) a += (90 - a) * spec.pull;
-    bgGrow(out, rnd, ex, ey, a, len * spec.decay, w * spec.taper, depth + 1,
-           { ...spec, spread: spec.spread * 0.9 });
+    bgGrow(out, rnd, tip[0], tip[1], a,
+           len * spec.decay * (0.9 + rnd() * 0.2), wEnd * (0.94 + rnd() * 0.1),
+           depth + 1, { ...spec, spread: spec.spread * 0.9 });
   }
+}
+
+/* The trunk. A baobab's is the whole point of the tree: enormous, squat, and
+   fluted like something poured rather than grown, flaring into buttresses
+   where it meets the ground. Generated as a profile so the fluting and the
+   noise are in the silhouette itself — stripes drawn over a translucent shape
+   read as a barcode, which is what the first attempt at this looked like. */
+function bgTrunkProfile(rnd, side, H, baseW, topW){
+  const pts = [];
+  const STEPS = 30;
+  for (let i = 0; i <= STEPS; i++){
+    const t = i / STEPS;                      // 0 at the ground, 1 at the shoulder
+    // Flares hard at the base, then eases — the buttress is most of the width.
+    const taper = topW + (baseW - topW) * Math.pow(1 - t, 1.55);
+    const flute = Math.sin(t * Math.PI * 2.6 + side * 1.1) * 15 * (1 - t * 0.5)
+                + Math.sin(t * Math.PI * 5.7 + side * 2.3) * 6 * (1 - t * 0.7);
+    const noise = (rnd() * 2 - 1) * 3.4;
+    pts.push([side * Math.max(14, taper + flute + noise), -H * t]);
+  }
+  return pts;
 }
 
 let bgRootGroups = [], bgDeepest = 1;
@@ -1551,44 +1686,106 @@ function buildBackdrop(){
   const g = $('bgTree');
   if (!g) return;
   // Seeded, so the tree behind the family is the same tree on every visit and
-  // on every device — it is scenery, and scenery that reshuffles is a distraction.
+  // on every device. Scenery that reshuffles between sessions is a distraction.
   let seed = 20260830 >>> 0;
   const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296;
 
+  const H = 330, BASE_W = 262, TOP_W = 104;
+  const left = bgTrunkProfile(rnd, -1, H, BASE_W, TOP_W);
+  const right = bgTrunkProfile(rnd, 1, H, BASE_W, TOP_W);
+  // Crossing the top with a straight line gave the trunk a flat lid and made
+  // it read as a boulder. The shoulder domes instead, unevenly — it is where
+  // the limbs tear away, and it is never level.
+  const shoulder = [];
+  for (let i = 1; i < 5; i++){
+    const t = i / 5;
+    shoulder.push([(-TOP_W + 2 * TOP_W * t) * 0.98,
+                   -H - Math.sin(t * Math.PI) * 26 - (rnd() * 2 - 1) * 7]);
+  }
+  const trunk = bgSmooth(left.concat(shoulder, right.slice().reverse()), true);
+
+  // Striations following the taper, so the trunk has grain running up it.
+  const grain = [];
+  for (let i = 0; i < 15; i++){
+    const at = -0.88 + (i / 14) * 1.76 + (rnd() * 2 - 1) * 0.03;
+    const top = 0.62 + rnd() * 0.3;
+    const pts = [];
+    for (let j = 0; j <= 8; j++){
+      const t = (j / 8) * top;
+      const taper = TOP_W + (BASE_W - TOP_W) * Math.pow(1 - t, 1.55);
+      pts.push([at * taper * (1 - t * 0.06) + (rnd() * 2 - 1) * 2.2, -H * t]);
+    }
+    grain.push({ d: bgSmooth(pts), w: (0.5 + rnd() * 1.5).toFixed(2),
+                 o: (0.25 + rnd() * 0.55).toFixed(2) });
+  }
+
   const canopy = [], roots = [];
-  // Baobab limbs leave the trunk almost horizontally before turning up. Kept
-  // shallow on purpose — fine twigs at this opacity turn into visual noise
-  // behind the family, which is the opposite of what a backdrop is for.
-  [[-128, -156], [-66, -128], [0, -98], [66, -62], [128, -30]].forEach(([x, a]) => {
-    bgGrow(canopy, rnd, x, -286 + Math.abs(x) * 0.06, a, 168 + rnd() * 44, 40, 0,
-           { maxDepth: 3, forkUntil: 9, decay: 0.62, taper: 0.55, spread: 27, curl: 1 });
-  });
-  // Roots go far deeper than the canopy is tall, and keep most of their length
+  // Baobab limbs leave the trunk almost horizontally before turning up, and
+  // they are enormously thick where they leave it.
+  [[-118, -152, 46], [-62, -126, 52], [-4, -98, 54], [58, -60, 50], [116, -28, 44]]
+    .forEach(([x, a, w]) => {
+      // Three levels, not four, and a blunt taper. At this opacity a fourth
+      // generation of twigs stops reading as a tree and starts reading as
+      // scratches — detail you cannot see is only noise.
+      bgGrow(canopy, rnd, x, -H + 14 + Math.abs(x) * 0.05, a, 168 + rnd() * 44, w, 0,
+             { maxDepth: 3, forkUntil: 9, decay: 0.66, taper: 0.68,
+               spread: 25, curl: 1, drift: 6 });
+    });
+  // Roots go far deeper than the canopy is tall and keep most of their length
   // each generation, so travelling down through the ancestors keeps finding
   // more tree rather than running out of it.
-  [[-186, 122], [-104, 106], [-34, 94], [34, 84], [104, 70], [186, 56]].forEach(([x, a]) => {
-    bgGrow(roots, rnd, x, -4, a, 200 + rnd() * 44, 30, 0,
-           { maxDepth: 7, forkUntil: 2, decay: 0.88, taper: 0.78,
-             spread: 26, curl: 0.85, pull: 0.07 });
-  });
+  [[-198, 121], [-112, 105], [-38, 95], [38, 85], [112, 71], [198, 57]]
+    .forEach(([x, a]) => {
+      bgGrow(roots, rnd, x, -6, a, 196 + rnd() * 44, 34, 0,
+             { maxDepth: 7, forkUntil: 2, decay: 0.88, taper: 0.84,
+               spread: 25, curl: 0.85, pull: 0.07, drift: 6 });
+    });
 
-  const out = [`<path class="bg-trunk" d="${BG_TRUNK}"/>`];
-  for (const d of BG_FOLDS) out.push(`<path class="bg-fold" stroke-width="14" d="${d}"/>`);
-  for (const l of canopy) out.push(`<path class="bg-limb" stroke-width="${l.w.toFixed(1)}" d="${l.d}"/>`);
+  // Clipped to the trunk, so the grain can never wander off it into the soil.
+  const out = [`<defs><clipPath id="bgTrunkClip"><path d="${trunk}"/></clipPath></defs>`];
 
-  // Roots are grouped by how deep they are, because each group fades in at a
-  // different point in the descent.
+  for (const l of canopy) out.push(`<path class="bg-limb" d="${l.d}"/>`);
+  out.push(`<path class="bg-trunk" d="${trunk}"/>`);
+  out.push('<g clip-path="url(#bgTrunkClip)">');
+  for (const s of grain){
+    out.push(`<path class="bg-grain" stroke-width="${s.w}" opacity="${s.o}" d="${s.d}"/>`);
+  }
+  out.push('</g>');
+
+  // Foliage last, so it sits in FRONT of the branches and softens them, the
+  // way a canopy in leaf does. Not drawn as leaves — at this distance
+  // individual leaves are noise. It is the soft mass a crown makes when it is
+  // far enough away to have no edges.
+  // The crown: the broad, flat-topped dome a baobab makes in leaf, and the
+  // half of the silhouette that carries the whole shape. Laid out along an arc
+  // rather than scattered — a random spread came out lopsided, and a crown
+  // that leans is the first thing the eye finds wrong.
+  const crownY = -H - 54;
+  for (const ring of [{ n: 15, rx: 372, ry: 150, s: 1 }, { n: 10, rx: 226, ry: 96, s: 0.86 }]){
+    for (let i = 0; i < ring.n; i++){
+      const t = i / (ring.n - 1);
+      const a = Math.PI * (1 - t);                    // left rim round to right
+      const cx = Math.cos(a) * ring.rx * (0.94 + rnd() * 0.12);
+      const cy = crownY - Math.sin(a) * ring.ry * (0.82 + rnd() * 0.36);
+      out.push(`<ellipse class="bg-haze" cx="${cx.toFixed(0)}" cy="${cy.toFixed(0)}" ` +
+               `rx="${(112 * ring.s + rnd() * 54).toFixed(0)}" ` +
+               `ry="${(56 * ring.s + rnd() * 26).toFixed(0)}"/>`);
+    }
+  }
+
+  // Roots are grouped by depth, because each group fades in at a different
+  // point in the descent.
   bgDeepest = roots.reduce((n, r) => Math.max(n, r.depth), 0);
   for (let d = 0; d <= bgDeepest; d++){
     const level = roots.filter(r => r.depth === d);
     if (!level.length) continue;
     out.push(`<g class="bg-roots" data-depth="${d}">` +
-      level.map(r => `<path class="bg-root" stroke-width="${r.w.toFixed(1)}" d="${r.d}"/>`).join('') +
-      `</g>`);
+      level.map(r => `<path class="bg-root" d="${r.d}"/>`).join('') + `</g>`);
   }
+
   g.innerHTML = out.join('');
-  // Cached: this is read on every pan frame, and querying the DOM each time
-  // would make dragging the tree measurably worse on a phone.
+  // Cached: read on every pan frame, and querying the DOM each time would make
+  // dragging measurably worse on a phone.
   bgRootGroups = Array.from(g.querySelectorAll('.bg-roots'))
     .map(el => ({ el, depth: Number(el.dataset.depth) }));
   placeBackdrop();
@@ -1602,7 +1799,7 @@ function placeBackdrop(){
   // tracks it exactly. Sideways it drifts at a fraction of the pan, and it
   // grows far more slowly than the family does on zoom, which is what puts it
   // at a distance rather than in the way.
-  const scale = Math.max(0.3, Math.min(1.5, (innerHeight * 0.8) / 900))
+  const scale = Math.max(0.3, Math.min(1.5, (innerHeight * 0.86) / 900))
               * (1 + (pos.k - 1) * 0.2);
   g.setAttribute('transform',
     `translate(${(innerWidth / 2 + pos.x * 0.12).toFixed(1)} ${pos.y.toFixed(1)}) ` +
