@@ -133,7 +133,7 @@ const esc = s => String(s).replace(/[&<>"]/g, c =>
    has proved they belong here. A preview that named the family would be a
    preview rendered on somebody else's servers and shown in a group chat. */
 function preview(origin) {
-  const title = 'The Baobab Project';
+  const title = 'The Muwuyu Project';
   const desc  = 'A Shona family tree. Mitupo, kinship, and the ancestors we share.';
   const img   = (origin || '') + '/preview.jpg';
   return `
@@ -157,7 +157,7 @@ function preview(origin) {
 function page({ message = '', status = 200, notice = '', origin = '' } = {}) {
   return { status, html: `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>The Baobab Project</title>${preview(origin)}
+<title>The Muwuyu Project</title>${preview(origin)}
 <style>
   :root{color-scheme:light dark;--sky:#F6F1E6;--ink:#221C13;--muted:#6E6555;
         --pod:#FFFDF7;--edge:#E3D9C6;--gold:#8A5A16;}
@@ -183,7 +183,7 @@ function page({ message = '', status = 200, notice = '', origin = '' } = {}) {
   .note{margin-top:16px;font-size:12px;color:var(--muted)}
 </style></head><body>
 <form class="card" method="POST" action="/gate" autocomplete="on">
-  <h1>The <em>Baobab</em> Project</h1>
+  <h1>The <em>Muwuyu</em> Project</h1>
   <p>A family tree kept by the family. Enter the passphrase you were given.</p>
   <label for="p">Passphrase</label>
   <input id="p" name="passphrase" type="password" autocomplete="current-password"
@@ -200,7 +200,7 @@ function page({ message = '', status = 200, notice = '', origin = '' } = {}) {
 function unconfiguredPage() {
   return `<!doctype html><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>The Baobab Project — not configured</title>
+<title>The Muwuyu Project — not configured</title>
 <body style="margin:0;min-height:100vh;display:grid;place-items:center;
              font:15px/1.7 system-ui,sans-serif;background:#F6F1E6;color:#221C13;padding:24px">
 <div style="max-width:440px">

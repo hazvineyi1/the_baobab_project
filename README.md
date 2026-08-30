@@ -1,4 +1,4 @@
-# The Baobab Project
+# The Muwuyu Project
 
 A shared, editable Shona family tree with a built-in kinship-term engine —
 the classificatory system where there is no "aunt", "uncle" or "cousin", just

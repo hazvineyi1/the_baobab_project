@@ -409,7 +409,7 @@ async function verify(client, treeId, data, loaded) {
 
 // ---------------------------------------------------------------------------
 
-async function run(pool, { apply = false, key = null, treeName = 'The Baobab Project', force = false } = {}) {
+async function run(pool, { apply = false, key = null, treeName = 'The Muwuyu Project', force = false } = {}) {
   await migrate(pool, () => {});
 
   const keys = key ? [key] : DEFAULT_KEYS;
@@ -514,7 +514,7 @@ if (require.main === module) {
     if (!pool) { console.error('DATABASE_URL is not set'); process.exit(2); }
     const apply = has('--apply');
     const res = await run(pool, { apply, key: val('--key'), force: has('--force'),
-                                  treeName: val('--name') || 'The Baobab Project' });
+                                  treeName: val('--name') || 'The Muwuyu Project' });
     if (!res.found) {
       console.log(`No family-tree blob found. Tried: ${res.keysTried.join(', ')}`);
       console.log('Nothing to migrate — this is a fresh database.');

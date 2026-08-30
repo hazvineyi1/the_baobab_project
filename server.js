@@ -1,4 +1,4 @@
-// The Baobab Project — server
+// The Muwuyu Project — server
 //
 // Serves the static frontend and a tiny key/value API that backs the
 // "shared" family-tree data. Personal preferences (who you are, layout
@@ -300,7 +300,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 setupDatabase()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`The Baobab Project listening on port ${PORT}`);
+      console.log(`The Muwuyu Project listening on port ${PORT}`);
     });
   })
   .catch(err => {

@@ -50,7 +50,7 @@ async function ensureHomeTree(pool, log = console.log) {
 
   // Nothing to carry across: a fresh deployment. Start one empty tree.
   const { rows } = await pool.query(
-    'INSERT INTO trees (name) VALUES ($1) RETURNING id', ['The Baobab Project']);
+    'INSERT INTO trees (name) VALUES ($1) RETURNING id', ['The Muwuyu Project']);
   log('No existing family found — started an empty tree.');
   return { treeId: rows[0].id, migrated: false, fresh: true };
 }

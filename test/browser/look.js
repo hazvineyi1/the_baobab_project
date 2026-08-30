@@ -50,7 +50,7 @@ const token = (page, name) => page.evaluate(
   is(await page.evaluate(() => document.documentElement.dataset.palette), undefined,
      'no palette attribute is set for the default');
   is(await token(page, 'gold'), '#8A5A16', 'and it is wearing antique brass');
-  is(await page.textContent('#look'), 'Baobab', 'the button names it');
+  is(await page.textContent('#look'), 'Muwuyu', 'the button names it');
 
   section('the chooser shows every palette, with its colours');
   await page.click('#look');

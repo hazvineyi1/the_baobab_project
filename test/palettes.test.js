@@ -71,13 +71,13 @@ const contrast = (a, b) => {
         palettes.some(p => /black.*grey/i.test(p.note)),
         palettes.map(p => p.note).join(' | '));
   eq('the default is the one the project was designed around',
-     palettes[0].label, 'Baobab');
+     palettes[0].label, 'Muwuyu');
   eq('and it is the empty value, so no attribute is set for it',
      palettes[0].v, '');
 
   section('every palette defines every colour, in both light and dark');
   // The default palette lives in the bare :root rules; the rest in their own.
-  const blocks = { Baobab: { light: blockFor(':root'), dark: blockFor(':root[data-theme="dark"]') } };
+  const blocks = { Muwuyu: { light: blockFor(':root'), dark: blockFor(':root[data-theme="dark"]') } };
   for (const p of palettes.slice(1)){
     blocks[p.label] = {
       light: blockFor(`:root[data-palette="${p.v}"]`),

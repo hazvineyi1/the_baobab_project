@@ -1,4 +1,4 @@
-# The Baobab Project — storage architecture
+# The Muwuyu Project — storage architecture
 
 ## What changed, and why
 
