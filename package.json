@@ -1,0 +1,16 @@
+{
+  "name": "muti-wemhuri",
+  "version": "1.0.0",
+  "description": "A collaborative Shona family tree with kinship-term logic, built for deployment on Railway.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
+  }
+}
