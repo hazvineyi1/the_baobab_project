@@ -2511,14 +2511,24 @@ const BG_PHOTO = {
   // presence is in its spread, so width is the dimension worth fixing, and the
   // crown is allowed to run past the top of the frame the way it does in every
   // photograph of one. `crown` caps how much of it may be lost.
-  width: 0.95,
+  //
+  // Over 1, so the outer branches leave at the sides as well. Standing under a
+  // baobab you cannot see the whole of it, and a tree small enough to fit the
+  // frame entirely reads as a tree in the distance rather than the one this
+  // family is standing in.
+  width: 1.7,
   crown: 0.62,        // at most this fraction of the tree may sit off-screen
   // Stretched horizontally. A baobab is squat — the thing everyone recognises
   // is a trunk far too fat for the tree standing on it — and photographs taken
   // from a distance flatten exactly that. Widening the image thickens the
   // trunk and broadens the crown together, which is the proportion the tree
   // has in life rather than the one a lens gives it.
-  fatten: 1.72,
+  //
+  // It also decides the proportions on its own: placeBackdrop solves the scale
+  // so the tree ends up `width` of the viewport whatever this is set to, so
+  // raising it does not make the picture wider — it makes it shorter for the
+  // same width, which is exactly what a fatter trunk means.
+  fatten: 2.35,
   // How hard the sky is cut away. Raise `cut` if the sky lingers as a haze;
   // lower it if fine branches are being eaten. `lift` sets how dark a pixel
   // has to be before it counts as tree at all.

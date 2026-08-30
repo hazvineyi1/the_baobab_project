@@ -17,13 +17,18 @@
   .lim{position:absolute;mix-blend-mode:screen;
        filter:brightness(.46) sepia(1) saturate(3.2) hue-rotate(2deg)}
   .lim img{width:100%;display:block}
-  .crown{right:56px;bottom:31%;width:404px;opacity:.92}
+  /* Bled off the right edge and stretched sideways, the same proportions the
+     app's backdrop uses: a baobab is recognised by a trunk too fat for the
+     tree on it, and at the earlier size it read as an ordinary tree. It stops
+     short of the title block — the crown's own left edge, after the stretch,
+     lands clear of it. */
+  .crown{right:-24px;bottom:31%;width:480px;opacity:.92;transform:scaleX(1.12)}
   /* A baobab is mostly roots, and this project puts ancestors below the
      horizon — so the same tree again, inverted, going down into the soil. */
   /* Flipped about its own centre, not its top edge: a top-origin flip
      sends the roots back up over the crown instead of down into the soil. */
-  .roots{right:56px;top:69%;width:404px;opacity:.5;
-         transform:scaleY(-.72)}
+  .roots{right:-24px;top:69%;width:480px;opacity:.5;
+         transform:scaleY(-.72) scaleX(1.12)}
 
   /* The roots should run out of sight into the soil rather than be sliced off
      by the edge of the card. */
