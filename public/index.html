@@ -1661,15 +1661,58 @@ function birthYear(id){
    is arranged by hand. Everyone else — the children of two brothers, say —
    is ranked by their own birth dates, because that is how this family counts
    seniority. No dates, no answer. */
+/* Who is older — which is the whole of Mukoma and Munin'ina, and of Amaiguru
+   and Amainini.
+
+   THE ORDER THE EVIDENCE IS WEIGHED IN, and it was wrong. Two children of one
+   marriage were settled by their position in the row, full stop, and their
+   recorded birth years were never consulted at all. That is not what this
+   project says anywhere else: db/ops.js has it that birth order "decides the
+   seniority terms (Mukoma / Munin'ina) WHEN BIRTH YEARS ARE MISSING", and it
+   was deciding them when the years were sitting right there disagreeing.
+
+   It matters because the two are not equally good evidence. A birth year is
+   something a family knows and states. A position in the row is often just
+   where somebody happened to get added — the app appends each new child last,
+   so an aunt entered after her nephew's mother sits after her by default.
+
+   So: years first when both are known and differ. Birth order when either
+   year is missing, which is the case it was always meant for and where it is
+   the only thing there is. Order also breaks a tie within one year, since two
+   people born in the same year still have an order and the family knows it. */
 function olderThan(a, b){
+  const ya = birthYear(a), yb = birthYear(b);
+  if (ya !== null && yb !== null && ya !== yb) return ya < yb;
+
+  // Same year, or one of them unknown: a full date settles it if there is one.
+  if (ya !== null && yb !== null){
+    const da = Date.parse(state.people[a].born), db = Date.parse(state.people[b].born);
+    if (!isNaN(da) && !isNaN(db) && da !== db) return da < db;
+  }
+
   const ua = parentUnionOf(a), ub = parentUnionOf(b);
   if (ua && ub && ua.id === ub.id) return birthRank(a) < birthRank(b);
-  const ya = birthYear(a), yb = birthYear(b);
-  if (ya === null || yb === null) return null;
-  if (ya !== yb) return ya < yb;
-  const da = Date.parse(state.people[a].born), db = Date.parse(state.people[b].born);
-  if (!isNaN(da) && !isNaN(db) && da !== db) return da < db;
-  return null;                                       // same year, no finer detail
+  return null;                          // nothing to go on
+}
+
+/* Where the row and the years disagree.
+
+   Not resolved silently — reported. The app now believes the years, but a row
+   that says one thing and a date that says another means somebody has entered
+   something they did not mean to, and the family is the only one who can say
+   which. Surfaced in the kinship panel beside the other gaps. */
+function seniorityConflicts(){
+  const out = [];
+  for (const u of unions()){
+    const kids = u.children.filter(present);
+    for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++){
+      const ya = birthYear(kids[i]), yb = birthYear(kids[j]);
+      if (ya === null || yb === null || ya === yb) continue;
+      // i comes before j in the row, so the row says i is the elder.
+      if (ya > yb) out.push({ a: kids[i], b: kids[j], ya, yb });
+    }
+  }
+  return out;
 }
 const possess = id => {
   const p = state.people[id];
@@ -4258,6 +4301,7 @@ function openKinship(){
   pending = { kind: 'dupes', anchorId: kinA || state.rootId };
 
   const cov = kinshipCoverage();
+  const conflicts = seniorityConflicts();
   const pct = cov.checked ? Math.round(cov.named / cov.checked * 100) : 100;
   const gapRow = (n, label, fix) => n
     ? `<div class="gaprow"><b>${n}</b><span>${esc(label)}<em>${esc(fix)}</em></span></div>` : '';
@@ -4300,6 +4344,18 @@ function openKinship(){
       : `<div class="gaps">` +
         gapRow(cov.gaps.seniority.length, 'older or younger is undecided',
                'both birth years are needed to choose Mukoma from Munin\u2019ina') +
+        /* Not a gap in what the tree can name — a disagreement inside what it
+           has been told. The app believes the years; this says where the row
+           it is drawn in says otherwise, because only the family knows which
+           of the two they meant. */
+        gapRow(conflicts.length, 'the row and the birth years disagree',
+               conflicts.length
+                 ? `${conflicts.slice(0, 3).map(c =>
+                     `${state.people[c.a].name.split(' ')[0]} (${c.ya}) is placed ` +
+                     `before ${state.people[c.b].name.split(' ')[0]} (${c.yb})`).join('; ')}` +
+                   `${conflicts.length > 3 ? ` and ${conflicts.length - 3} more` : ''}` +
+                   ' — the years are being believed'
+                 : '') +
         gapRow(cov.gaps.sex.length, 'the term depends on he or she',
                'record which, and the word follows') +
         gapRow(cov.gaps.unlinked.length, 'no traced link between them',

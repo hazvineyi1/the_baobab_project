@@ -235,5 +235,85 @@ const why  = (fe, a, b) => { const t = shown(fe, a, b); return t ? t.why : ''; }
     eq('none', [...new Set(bad)], []);
   }
 
+  // ── who is older, and what the app believes when its sources disagree ────
+  section('SENIORITY: a recorded birth year beats a position in the row');
+  /* Reported from the family's own tree: "my older sister's kids would call me
+     amainini, my kids would call my older sisters amaiguru. So to Victor,
+     Hazvineyi would be amainini."
+
+     The rule was already right. What was wrong was which evidence won. Two
+     children of one marriage were settled by their position in the row and
+     their birth years were never consulted — while db/ops.js has said all
+     along that birth order decides seniority WHEN BIRTH YEARS ARE MISSING.
+
+     They are not equally good evidence. A year is something a family knows and
+     states; a row position is often just where somebody got added, since every
+     new child is appended last. */
+  {
+    const fe = loadFrontend();
+    const mother = fe.addPerson('Evelyn', 'f', 'Moyondizvo', '1954', '');
+    // Entered in this order, so the row says Hazvineyi is the elder...
+    const haz = fe.addPerson('Hazvineyi', 'f', 'Nzou', '1978', '');
+    const ida = fe.addPerson('Ida', 'f', 'Nzou', '1972', '');
+    fe.addUnion([mother], [haz, ida]);
+    const idaH = fe.addPerson('Tendai', 'm', 'Moyo', '1970', '');
+    const victor = fe.addPerson('Victor', 'm', 'Moyo', '2000', '');
+    fe.addUnion([ida, idaH], [victor]);
+
+    // ...but the years say she is the younger, and the years are believed.
+    eq('Ida is the elder, by her year', fe.olderThan(ida, haz), true);
+    eq('so Victor calls his mother\'s younger sister Amainini',
+       term(fe, victor, haz), 'Amainini');
+    eq('and Hazvineyi calls her older sister Mukoma', term(fe, haz, ida), 'Mukoma');
+  }
+
+  section('and the row still decides when a year is missing');
+  // Which is the case birth order was always for, and the only evidence there
+  // is when nobody has recorded a year.
+  {
+    const fe = loadFrontend();
+    const mother = fe.addPerson('Evelyn', 'f', 'Moyondizvo', '1954', '');
+    const haz = fe.addPerson('Hazvineyi', 'f', 'Nzou', '', '');
+    const ida = fe.addPerson('Ida', 'f', 'Nzou', '1972', '');
+    fe.addUnion([mother], [ida, haz]);          // Ida placed first
+    const idaH = fe.addPerson('Tendai', 'm', 'Moyo', '1970', '');
+    const victor = fe.addPerson('Victor', 'm', 'Moyo', '2000', '');
+    fe.addUnion([ida, idaH], [victor]);
+    eq('the row is believed, because it is all there is',
+       term(fe, victor, haz), 'Amainini');
+  }
+
+  section('a disagreement is reported rather than resolved quietly');
+  {
+    const fe = loadFrontend();
+    const mother = fe.addPerson('Evelyn', 'f', 'Moyondizvo', '1954', '');
+    const bertha = fe.addPerson('Bertha', 'f', 'Nzou', '1975', '');
+    const ida = fe.addPerson('Ida', 'f', 'Nzou', '1972', '');
+    fe.addUnion([mother], [bertha, ida]);       // row says Bertha is elder
+    const clash = fe.seniorityConflicts();
+    eq('one disagreement found', clash.length, 1);
+    eq('and it names the one placed too early', clash[0].a, bertha);
+    eq('with both years, so the family can see which they meant',
+       [clash[0].ya, clash[0].yb], [1975, 1972]);
+  }
+
+  section('and a tree whose row and years agree reports nothing');
+  {
+    const fe = loadFrontend();
+    const mother = fe.addPerson('Evelyn', 'f', 'Moyondizvo', '1954', '');
+    fe.addUnion([mother], [fe.addPerson('A', 'f', 'Nzou', '1972', ''),
+                           fe.addPerson('B', 'f', 'Nzou', '1975', '')]);
+    eq('nothing to report', fe.seniorityConflicts(), []);
+  }
+
+  section('nor does one where the years are simply not known');
+  {
+    const fe = loadFrontend();
+    const mother = fe.addPerson('Evelyn', 'f', 'Moyondizvo', '1954', '');
+    fe.addUnion([mother], [fe.addPerson('A', 'f', 'Nzou', '', ''),
+                           fe.addPerson('B', 'f', 'Nzou', '1975', '')]);
+    eq('a missing year is not a disagreement', fe.seniorityConflicts(), []);
+  }
+
   report();
 })();

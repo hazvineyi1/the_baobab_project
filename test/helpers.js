@@ -116,6 +116,7 @@ function loadFrontend(){
       teachTerm, forgetTerm, affirmTerm, lexicon, shapeLabel, kinVerdict,
       frontier, isOpenEnd, descendantsOf, toggleRoot,
       parentageOptions, parentageOf, setParentage, unionForShare, unionsOf, reorder,
+      olderThan, seniorityConflicts, birthYear,
       setAside, restore, noticesFor, asidePeople, present, mergePeople, meName,
       knownTotem, totemKey, totemsHere, totemSuggestions, MITUPO,
       PALETTES, THEMES,
