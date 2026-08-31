@@ -2153,19 +2153,28 @@ function overlaps(who, tid){
   if (p && p.mothersBrother && p.genDiff === 0 && them.sex === 'f'){
     /* His sons stay Sekuru; his daughters do not.
 
-       THE WORD HERE WAS CHANGED. It said Amai, on the reasoning that his
-       daughters are mothers to you. The family building this tree has since
-       said Mainini — "my brothers sons are sekuru to my children and his
-       daughters are mainini to my children" — and that is the word now.
+       THE WORD HERE WAS CHANGED, TWICE, and both are worth keeping on the
+       record because neither was a mistake — each was what the family had said
+       at the time.
 
-       The two are not far apart and the reasoning is the same in both: she is
-       a woman of your mother's house, standing in the mother role. Mainini is
-       the junior form of it, which is the distinction the family drew and this
-       app did not. */
+       It said Amai first: his daughters are mothers to you. The family then
+       said mainini — "my brothers sons are sekuru to my children and his
+       daughters are mainini to my children" — and then, asked whether that was
+       the same word as the one a mother's sister carries: "same word, but
+       mothers brothers daughter is not graded by age."
+
+       So it is AMAININI, the same word, and the grading is the whole of the
+       difference between this and the line above it. Your mother's SISTER is
+       graded: older is Amaiguru, younger is Amainini. Your mother's brother's
+       DAUGHTER is Amainini whatever her age — she is of your mother's house,
+       and that is what the word is saying, not where she falls among her own.
+
+       Which is why there is no seniority test in here and must not be one. */
     out.push({
       shape: 'overlap:mothers-brothers-daughter',
-      term: 'Mainini', replaces: true,
-      why: "your mother's brother's daughter — a woman of your mother's house"
+      term: 'Amainini', replaces: true,
+      why: "your mother's brother's daughter — a woman of your mother's house, " +
+           "and not graded by age the way your mother's own sisters are"
     });
   }
 
@@ -4283,6 +4292,16 @@ function shapeLabel(shape){
     const asA = looking === 'unknown' ? '' : ` — as a ${looking} sees them`;
     const ofSex = them === 'unknown' ? '' : ` (${them})`;
     return `your ${what}${ofSex}${asA}`;
+  }
+
+  if (p[0] === 'overlap'){
+    const said = (p[1] || '').replace(/-/g, ' ')
+      .replace(/^mothers brothers daughter$/, "mother's brother's daughter")
+      .replace(/^mothers brothers wife$/, "mother's brother's wife")
+      .replace(/^fathers sisters child$/, "father's sister's child")
+      .replace(/^fathers sister$/, "father's sister");
+    const looking = (p[2] || '').replace('-looking', '');
+    return `your ${said}${looking && looking !== 'unknown' ? ` — as a ${looking} sees them` : ''}`;
   }
 
   if (p[0] !== 'inlaw') return shape;

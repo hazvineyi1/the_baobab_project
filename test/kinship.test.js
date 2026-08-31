@@ -72,9 +72,9 @@ const terms = (from, to) => {
      children and his daughters are mainini to my children". Same house, same
      reasoning, junior form — which is the distinction they drew and the app
      had flattened. */
-  eq('his DAUGHTER is not — she is Mainini, a woman of your mother\'s house, to a man',
-     terms(f.man, f.mbd), ['Mainini']);
-  eq('and to a woman', terms(f.woman, f.mbd), ['Mainini']);
+  eq('his DAUGHTER is not — she is Amainini, a woman of your mother\'s house, to a man',
+     terms(f.man, f.mbd), ['Amainini']);
+  eq('and to a woman', terms(f.woman, f.mbd), ['Amainini']);
 
   section("your mother's brother's wife");
   eq('to a man she is Ambuya, and also a wife', terms(f.man, f.mbw), ['Ambuya', 'Mukadzi']);

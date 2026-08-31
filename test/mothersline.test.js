@@ -108,15 +108,63 @@ const why  = (fe, a, b) => { const t = shown(fe, a, b); return t ? t.why : ''; }
   }
 
   // ── "my brother's sons are sekuru, his daughters are mainini" ─────────────
-  section('a mother\'s brother\'s son is Sekuru, and his daughter is Mainini');
+  section('a mother\'s brother\'s son is Sekuru, and his daughter is Amainini');
   {
     const { fe, hazSon, hazDau, broSon, broDau } = house();
     eq('her son to his son', term(fe, hazSon, broSon), 'Sekuru');
-    eq('her son to his daughter', term(fe, hazSon, broDau), 'Mainini');
+    eq('her son to his daughter', term(fe, hazSon, broDau), 'Amainini');
     eq('her daughter to his son', term(fe, hazDau, broSon), 'Sekuru');
-    eq('her daughter to his daughter', term(fe, hazDau, broDau), 'Mainini');
+    eq('her daughter to his daughter', term(fe, hazDau, broDau), 'Amainini');
     check('and the reason names the house it comes from',
           /mother's house/.test(why(fe, hazSon, broDau)), why(fe, hazSon, broDau));
+  }
+
+  section('AND IT IS NOT GRADED BY AGE, which is the whole difference');
+  /* "same word, but mothers brothers daughter is not graded by age."
+
+     Your mother's SISTER is graded — older is Amaiguru, younger is Amainini.
+     Your mother's brother's DAUGHTER is Amainini whatever her age. The word is
+     saying she is of your mother's house; it is not saying where she falls
+     among her own. So this builds one of each, one older than the mother and
+     one younger, and asserts they are the same word — and then asserts the
+     mother's own sisters beside them are NOT, because a test that only shows
+     the flat case would pass just as well if grading had never existed. */
+  {
+    const fe = loadFrontend();
+    const gf = fe.addPerson('Sekuru', 'm', 'Nzou', '1920', '');
+    const gm = fe.addPerson('Ambuya', 'f', 'Shava', '1925', '');
+    const mother = fe.addPerson('Evelyn', 'f', 'Nzou', '1954', '');
+    const elderAunt = fe.addPerson('Maiguru Tsitsi', 'f', 'Nzou', '1948', '');
+    const youngerAunt = fe.addPerson('Mainini Agnes', 'f', 'Nzou', '1960', '');
+    const uncle = fe.addPerson('Sekuru Farai', 'm', 'Nzou', '1950', '');
+    fe.addUnion([gf, gm], [elderAunt, uncle, mother, youngerAunt]);
+
+    const uncleW = fe.addPerson('Janet', 'f', 'Moyo', '1955', '');
+    // One of his daughters is older than the mother, one younger.
+    const olderCousin = fe.addPerson('Rudo', 'f', 'Nzou', '1949', '');
+    const youngerCousin = fe.addPerson('Chipo', 'f', 'Nzou', '1985', '');
+    fe.addUnion([uncle, uncleW], [olderCousin, youngerCousin]);
+
+    const father = fe.addPerson('Joseph', 'm', 'Shava', '1950', '');
+    const child = fe.addPerson('Takunda', 'm', 'Shava', '1980', '');
+    fe.addUnion([mother, father], [child]);
+
+    eq('his daughter older than your mother is Amainini',
+       term(fe, child, olderCousin), 'Amainini');
+    eq('and his daughter younger than your mother is Amainini too',
+       term(fe, child, youngerCousin), 'Amainini');
+    check('so the age made no difference at all',
+          term(fe, child, olderCousin) === term(fe, child, youngerCousin));
+
+    section('while your mother\'s own sisters ARE graded, beside them');
+    eq('her older sister is Amaiguru', term(fe, child, elderAunt), 'Amaiguru');
+    eq('her younger sister is Amainini', term(fe, child, youngerAunt), 'Amainini');
+    check('which is the distinction the family drew',
+          term(fe, child, elderAunt) !== term(fe, child, youngerAunt));
+
+    section('and the word for the cousin is the same word, not a near one');
+    eq('the same as the younger sister carries',
+       term(fe, child, olderCousin), term(fe, child, youngerAunt));
   }
 
   section('the mother\'s brother himself is still Sekuru');
@@ -190,10 +238,10 @@ const why  = (fe, a, b) => { const t = shown(fe, a, b); return t ? t.why : ''; }
   {
     const { fe, hazSon, broDau } = house();
     const t = shown(fe, hazSon, broDau);
-    eq('the app read Mainini', t.term, 'Mainini');
+    eq('the app read Amainini', t.term, 'Amainini');
     fe.affirmTerm(t.shape, t.term, 'she is of my mother\'s house');
     const k = fe.kinTerms(hazSon, broDau);
-    eq('the word is unchanged', k.list[0].term, 'Mainini');
+    eq('the word is unchanged', k.list[0].term, 'Amainini');
     eq('but it is now agreed rather than guessed', k.list[0].affirmed, true);
     eq('and not shown as a correction', k.list[0].taught, false);
     eq('with the reason kept', k.list[0].note, 'she is of my mother\'s house');
@@ -208,7 +256,7 @@ const why  = (fe, a, b) => { const t = shown(fe, a, b); return t ? t.why : ''; }
     fe.forgetTerm(t.shape);
     eq('and back to the app\'s own reading',
        fe.kinTerms(hazSon, broDau).list[0].affirmed, false);
-    eq('which is still the same word', fe.kinTerms(hazSon, broDau).list[0].term, 'Mainini');
+    eq('which is still the same word', fe.kinTerms(hazSon, broDau).list[0].term, 'Amainini');
   }
 
   section('the family\'s own list of words reads as sentences, not as keys');
