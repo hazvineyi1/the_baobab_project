@@ -121,4 +121,41 @@ function securityHeaders({ enabled = true } = {}) {
 const withNonce = (html, nonce) =>
   html.split('<script>').join(`<script nonce="${nonce}">`);
 
-module.exports = { securityHeaders, withNonce, policy, newNonce };
+/* ── ONE ADDRESS ───────────────────────────────────────────────────────────
+
+   A site on both themuwuyuproject.org and www.themuwuyuproject.org is two
+   sites as far as a browser is concerned, and here that costs more than
+   tidiness: the session cookie is scoped to the host it was set on, so a
+   family signing in at the bare domain and then following a link to www is
+   asked for their passcode again, on what is to them the same site. Links
+   people send each other split the same way.
+
+   SO ONLY WITHIN THE SAME REGISTRABLE DOMAIN. The apex and any other
+   subdomain of it are sent to the canonical host; everything else — the
+   railway.app address, 127.0.0.1, whatever a test or a laptop is using — is
+   left alone. A redirect that caught every host would be one that broke every
+   way in except the one somebody remembered to configure.
+
+   301, because it is permanent and browsers and search engines should be told
+   so, and the path and query travel with it: an invitation link that arrives
+   at the wrong host must still open the invitation.
+
+   /health is never redirected. It is what the platform asks to know the
+   service is alive, and an answer of "look over there" is not an answer. */
+function canonicalHost(canonical) {
+  const want = String(canonical || '').trim().toLowerCase().replace(/\.$/, '');
+  if (!want) return (req, res, next) => next();
+  // The registrable domain this applies to: www.example.org guards example.org
+  // and everything under it, and nothing else anywhere.
+  const apex = want.replace(/^www\./, '');
+
+  return function canonical(req, res, next) {
+    if (req.path === '/health') return next();
+    const host = String(req.headers.host || '').toLowerCase().split(':')[0];
+    if (!host || host === want) return next();
+    if (host !== apex && !host.endsWith('.' + apex)) return next();
+    return res.redirect(301, `https://${want}${req.originalUrl || req.url || '/'}`);
+  };
+}
+
+module.exports = { securityHeaders, withNonce, policy, newNonce, canonicalHost };

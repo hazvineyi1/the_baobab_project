@@ -21,7 +21,7 @@ const { trigramAvailable } = require('./db/reads');
 const { ensureHomeTree } = require('./db/home');
 const { gate, requireAdmin } = require('./auth');
 const audit = require('./db/audit');
-const { securityHeaders, withNonce } = require('./security');
+const { securityHeaders, withNonce, canonicalHost } = require('./security');
 
 const app = express();
 
@@ -84,6 +84,12 @@ app.use('/public', publicRouter);
  
    The passphrase itself comes from the environment and appears nowhere else:
    not in this repository, not in a log line, not in an error message. */
+/* One address, when there is one to be canonical about. See security.js:
+   without this a family signing in at themuwuyuproject.org and then following
+   a link to www is asked for their passcode again on what is to them the same
+   site. Unset — locally, and on the railway.app address — nothing redirects. */
+app.use(canonicalHost(process.env.MW_CANONICAL_HOST));
+
 app.use(gate({
   // The old deployment-wide passphrase. Still opens the home family, so this
   // change signs nobody out; every other family now has its own passcode.

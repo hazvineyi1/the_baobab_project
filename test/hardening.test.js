@@ -15,7 +15,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { check, eq, section, report, freshPool, newTree } = require('./helpers');
-const { securityHeaders, withNonce, policy } = require('../security');
+const { securityHeaders, withNonce, policy, canonicalHost } = require('../security');
 const { limiter, limitKeyOf, addressOf } = require('../auth');
 const audit = require('../db/audit');
 
@@ -139,6 +139,55 @@ const directive = (csp, name) => {
   }
 
   server.close();
+
+  /* ── ONE ADDRESS ─────────────────────────────────────────────────────────
+     The session cookie is scoped to the host it was set on, so a family
+     signing in at the bare domain and then following a link to www would be
+     asked for their passcode again on what is to them the same site. */
+  section('the bare domain is sent to the one canonical address');
+  const canon = express();
+  canon.use(canonicalHost('www.themuwuyuproject.org'));
+  canon.get('/health', (req, res) => res.send('ok'));
+  canon.get('*', (req, res) => res.send('served'));
+  const cs = await listen(canon);
+
+  const apex = await get(cs, '/join/abc?x=1', { host:'themuwuyuproject.org' });
+  eq('permanently', apex.status, 301);
+  eq('to www, with the path and the query intact',
+     apex.headers.location, 'https://www.themuwuyuproject.org/join/abc?x=1');
+
+  section('and an invitation that lands on the wrong host still opens');
+  // The path travelling with the redirect is the whole of why: a link sent
+  // through WhatsApp is the commonest way anybody arrives here at all.
+  check('the token is still in it', apex.headers.location.includes('/join/abc'));
+
+  section('the canonical host itself is served, not bounced');
+  eq('served', (await get(cs, '/', { host:'www.themuwuyuproject.org' })).status, 200);
+
+  section('and NOTHING outside that domain is touched');
+  /* A redirect that caught every host would break every way in except the one
+     somebody remembered to configure — the railway.app address, a laptop, the
+     browser suites. */
+  for (const host of ['muti-wemhuri-production.up.railway.app', '127.0.0.1:3940',
+                      'localhost', 'themuwuyuproject.org.evil.example']) {
+    eq(`${host} is left alone`, (await get(cs, '/', { host })).status, 200);
+  }
+
+  section('and /health is never redirected');
+  // It is what the platform asks to know the service is alive, and "look over
+  // there" is not an answer.
+  eq('answered where it was asked',
+     (await get(cs, '/health', { host:'themuwuyuproject.org' })).status, 200);
+
+  section('with nothing configured, nothing redirects');
+  const off = express();
+  off.use(canonicalHost(''));
+  off.get('*', (req, res) => res.send('served'));
+  const os = await listen(off);
+  eq('served as it was asked for',
+     (await get(os, '/', { host:'themuwuyuproject.org' })).status, 200);
+  os.close();
+  cs.close();
 
   // ── rate limits ──────────────────────────────────────────────────────────
   section('the limiter counts per address and forgets after the window');
