@@ -115,6 +115,7 @@ function loadFrontend(){
       relationship, kinTerms, kinPath, overlaps, grow, addPerson, addUnion,
       teachTerm, forgetTerm, lexicon,
       frontier, isOpenEnd, descendantsOf, toggleRoot,
+      parentageOptions, parentageOf, setParentage, unionForShare, unionsOf, reorder,
       setAside, restore, noticesFor, asidePeople, present, mergePeople, meName,
       knownTotem, totemKey, totemsHere, totemSuggestions, MITUPO,
       PALETTES, THEMES,

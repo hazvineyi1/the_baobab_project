@@ -62,4 +62,23 @@ const settled = page => page.waitForFunction(
   () => { try { return typeof store === 'string'; } catch (e) { return false; } },
   null, { timeout: 20000 });
 
-module.exports = { BASE, EXE, PASSPHRASE, openApp, enter, onlyThisOrigin, ready, settled };
+/* Waits until the server has everything.
+
+   `settled` only says the page has decided WHERE it keeps things. It does not
+   say anything has been sent, so a suite that writes and then reads back is
+   racing its own save — and the race is invisible until an id changes under an
+   open panel and the run fails once in five.
+
+   This asks the page the only question that actually answers it: is there
+   still a difference between what is on screen and what was last synced? */
+const saved = page => page.waitForFunction(
+  () => {
+    try {
+      if (typeof store !== 'string') return false;
+      if (store !== 'shared') return true;          // local: nothing to send
+      return !sending && diffOps(synced, state).length === 0;
+    } catch (e) { return false; }
+  }, null, { timeout: 20000 });
+
+module.exports = { BASE, EXE, PASSPHRASE, openApp, enter, onlyThisOrigin,
+                   ready, settled, saved };

@@ -623,6 +623,11 @@ body{
   font-family:'Karla',sans-serif; font-size:12px; font-weight:600;
 }
 .seg button[aria-pressed="true"]{background:var(--gold); border-color:var(--gold); color:var(--pod);}
+/* Whose child a new brother or sister is: the answers are phrases rather than
+   one or two words ("Sydney, by another mother"), so they stack instead of
+   sharing a row. */
+.seg.col{flex-direction:column; gap:4px;}
+.seg.col button{flex:none; padding:8px 11px; text-align:left;}
 .row{display:flex; gap:7px;}
 .btn{
   flex:1; padding:9px 0; border-radius:9px; cursor:pointer;
@@ -1069,9 +1074,31 @@ function grow(kind, anchorId, name, sex, totem, opts){
     else addUnion([id], [anchorId]);
   }
   else if (kind === 'sibling'){
-    const pu = parentUnionOf(anchorId) || addUnion([], [anchorId]);
+    /* WHOSE CHILD, asked rather than assumed.
+
+       This used to put every new sibling into the anchor's own parent union —
+       same mother, same father, no question. In a family with one marriage
+       that is right and nobody notices. In a family with two it is wrong, and
+       it is wrong SILENTLY: the tree ends up asserting a mother it was never
+       told about, and the assertion looks exactly like something the family
+       said.
+
+       opts.share carries the answer, and every answer is a union:
+         a union id  — these parents, whether the anchor's own or another
+                       marriage one of them is already in
+         a person id — that parent, by somebody not yet named
+         nothing     — the anchor has no parents recorded, so there is nothing
+                       to assume and the two simply share whoever they are */
+    let chosen = opts.share ? unionForShare(anchorId, opts.share) : null;
+    // An answer that resolves to a marriage the new person is already in is an
+    // answer that has gone stale — see rewriteHeldIds. Refuse it rather than
+    // recording somebody as their own parent and losing the whole batch to the
+    // server's refusal.
+    if (chosen && chosen.partners.includes(id)) chosen = null;
+    const pu = chosen || parentUnionOf(anchorId) || addUnion([], [anchorId]);
     const at = pu.children.indexOf(anchorId);
-    pu.children.splice(opts.position === 'older' ? at : at + 1, 0, id);
+    if (at < 0) pu.children.push(id);                    // a different marriage
+    else pu.children.splice(opts.position === 'older' ? at : at + 1, 0, id);
   }
   else if (kind === 'partner'){
     // fill a marriage that only has one name in it, otherwise start a new one
@@ -1086,6 +1113,104 @@ function grow(kind, anchorId, name, sex, totem, opts){
     u.children.push(id);                   // newest is youngest
   }
   return id;
+}
+
+/* Which parents a brother or sister could have, in the words a family uses.
+
+   The answer is always a union, because children hang off a marriage rather
+   than off a person — which is the shape that makes half siblings, remarriage
+   and a father's second wife all representable without a special case. What
+   this does is turn that shape into a question somebody can actually answer:
+
+     the anchor's own marriage      "Same mother and father"
+     another marriage of a parent   "Sydney and Rudo"
+     a parent, on their own         "Sydney, by another mother"
+
+   Returned in that order, closest first. An anchor with no parents recorded
+   gets nothing back at all: there is no assumption to make and no question
+   worth asking, and the two simply share whoever their parents turn out to
+   be. */
+function parentageOptions(anchorId){
+  const pu = parentUnionOf(anchorId);
+  if (!pu) return [];
+  const named = pu.partners.filter(x => state.people[x] && present(x));
+  if (!named.length) return [];
+
+  const first = id => (state.people[id].name || '').split(' ')[0] || 'them';
+  const out = [{
+    key: 'u:' + pu.id,
+    label: named.length > 1 ? 'Same mother and father' : `Same as ${first(named[0])}`,
+    why: 'the marriage this person is already a child of'
+  }];
+
+  // Other marriages either parent is in. Named by the two people in them,
+  // because that is how a family says which marriage it means.
+  for (const parent of named){
+    for (const u of unionsOf(parent)){
+      if (u.id === pu.id) continue;
+      const other = u.partners.find(x => x !== parent && state.people[x]);
+      out.push({
+        key: 'u:' + u.id,
+        label: other ? `${first(parent)} and ${first(other)}` : `${first(parent)}, on their own`,
+        why: 'another marriage already recorded'
+      });
+    }
+  }
+
+  // And a parent by somebody not yet in the tree.
+  for (const parent of named){
+    const p = state.people[parent];
+    const otherSide = p.sex === 'm' ? 'mother' : p.sex === 'f' ? 'father' : 'parent';
+    out.push({
+      key: 'p:' + parent,
+      label: `${first(parent)}, by another ${otherSide}`,
+      why: `a marriage of ${first(parent)}'s that is not recorded yet`
+    });
+  }
+  return out;
+}
+
+/* Turn one of those answers back into a union, making it if it does not
+   exist. A person key means a marriage of theirs nobody has named yet — so it
+   is created with that parent alone in it, which the model allows on purpose:
+   plenty of ancestors are recorded with one parent known and the other not. */
+function unionForShare(anchorId, share){
+  if (!share) return null;
+  if (share.startsWith('u:')) return state.unions[share.slice(2)] || null;
+  if (share.startsWith('p:')){
+    const parent = share.slice(2);
+    return state.people[parent] ? addUnion([parent], []) : null;
+  }
+  return null;
+}
+
+/* Which option a person is currently recorded under, so the panel can show
+   what the tree says now rather than asking as though nothing were known. */
+function parentageOf(id){
+  const pu = parentUnionOf(id);
+  return pu ? 'u:' + pu.id : null;
+}
+
+/* Move somebody to a different set of parents.
+
+   THIS IS THE ONE WAY A RECORDED PARENT LINK CHANGES, and it is a correction
+   rather than an erasure: nobody is removed from the tree, nothing is
+   deleted, and the person keeps every marriage and child of their own. What
+   changes is which marriage they hang off.
+
+   The old union is left in place even if it empties. There is no removeUnion
+   op and there should not be one — an empty marriage is harmless, and
+   inventing a destructive tidy-up is exactly the trade this project does not
+   make. */
+function setParentage(id, share){
+  const to = unionForShare(id, share);
+  if (!to) return false;
+  const from = parentUnionOf(id);
+  if (from && from.id === to.id) return false;
+  snapshot();
+  if (from) from.children = from.children.filter(x => x !== id);
+  if (!to.children.includes(id)) to.children.push(id);
+  return true;
 }
 
 /* Move somebody one place among their brothers and sisters. */
@@ -1630,6 +1755,46 @@ function derive(who, tid, byBloodOnly){
     if (n === 1) return { term: them.sex === 'f' ? 'Mwanasikana' : them.sex === 'm' ? 'Mwanakomana' : null,
                           why:'your child' };
     return { term:'Muzukuru', why:n === 2 ? 'your grandchild' : `your descendant, ${n} generations down` };
+  }
+
+  /* ── half brothers and sisters ─────────────────────────────────────────
+
+     Two children of one father by different mothers. The search below cannot
+     find them and never could: it looks for a UNION both descend from, and
+     half siblings descend from two different marriages. What they have in
+     common is a person, not a marriage.
+
+     Left unfound they came back as nothing at all — not cousins, not
+     relatives, strangers — which for a Shona family is not a small gap. A
+     man's children by two wives are mukoma and munin'ina to each other, and
+     the tree had no word for them.
+
+     Note what is NOT done here: the word is not thinned out. English reaches
+     for "half-brother"; Shona does not, and neither does the rest of this
+     file — the classificatory case below already calls a father's brother's
+     child a brother rather than a cousin. The same seniority rule applies,
+     and olderThan already falls back to birth years when the two are in
+     different marriages and birth order cannot compare them. */
+  const myParents = parentUnionOf(who), theirParents = parentUnionOf(tid);
+  if (myParents && theirParents && myParents.id !== theirParents.id){
+    const shared = myParents.partners.filter(x => theirParents.partners.includes(x));
+    if (shared.length){
+      const older = olderThan(tid, who);
+      const t = SIB(me.sex, them.sex, older);
+      const p = state.people[shared[0]];
+      const through = shared.length > 1
+        ? 'both your parents'
+        : `your ${p.sex === 'f' ? 'mother' : p.sex === 'm' ? 'father' : 'parent'} ${p.name}`;
+      const base = `${through}'s child by another marriage — ` +
+                   'a brother or sister to you';
+      const needsAge = !t && me.sex && them.sex && me.sex === them.sex;
+      // Same as the classificatory case: naming both candidates says the word
+      // is one of two and that a birth year is all that is missing.
+      return needsAge
+        ? { term:null, choice:"Mukoma or Munin'ina",
+            why:`${base} — add both birth years to say which` }
+        : { term:t, why:base };
+    }
   }
 
   // where the two lines meet: the nearest union both descend from
@@ -3048,6 +3213,33 @@ function openDuplicates(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
+/* Whose child this person is — shown on their card so a wrong answer can be
+   put right.
+
+   THIS IS WHY IT IS HERE. Adding a brother or sister used to attach them to
+   the anchor's own mother and father without asking, so trees built before
+   that changed are full of half siblings recorded as full ones — an assertion
+   about somebody's mother that nobody in the family ever made. The form now
+   asks; this is how the ones already recorded get corrected.
+
+   Nothing is deleted by changing it. The person keeps their name, their
+   marriages and their own children; what moves is which marriage they hang
+   off. The marriage they came from stays where it is even if it empties. */
+function parentageBlock(id){
+  const options = parentageOptions(id);
+  if (options.length < 2) return '';
+  const now = parentageOf(id);
+  return `<p class="lbl">Whose child</p><div class="seg col" id="cParents">` +
+    options.map(o =>
+      `<button type="button" data-parents="${esc(o.key)}" ` +
+      `aria-pressed="${o.key === now}" title="${esc(o.why)}">${esc(o.label)}</button>`
+    ).join('') + `</div>` +
+    `<p class="roothint">A brother or sister by a different mother or father is ` +
+    `still your brother or sister — the tree says so either way. This is about ` +
+    `whose child they are, which is a different question and one worth getting ` +
+    `right.</p>`;
+}
+
 /* Whether this person is in the public record.
  
    Worth saying plainly on the card rather than in a settings screen, because
@@ -4023,6 +4215,7 @@ function openCard(id){
         'from the tree itself.'
       : 'Mark this if nobody can go back past them — it tells the next person ' +
         'the work ended here rather than leaving them to guess.'}</p>` +
+    parentageBlock(id) +
     visibilityBlock(p) +
     `<button class="btn ghost wide${meId === id ? ' on' : ''}" id="cMe">` +
       `${meId === id ? '● This is you' : 'This is me'}</button>` +
@@ -4045,6 +4238,14 @@ function openCard(id){
     p.totem = $('cTotem').value.trim();
   };
   $('cSave').onclick = () => { commit(); closeForm(); render(); save(); };
+  el.querySelectorAll('[data-parents]').forEach(b => b.onclick = () => {
+    commit();
+    const label = b.textContent.trim();
+    if (setParentage(id, b.dataset.parents)){
+      closeForm(); render(); save();
+      say(`${p.name} is now recorded as ${label.toLowerCase()}.`);
+    } else { closeForm(); }
+  });
   $('cNo').onclick = closeForm;
   el.querySelectorAll('[data-vis]').forEach(b => b.onclick = () => {
     commit();
@@ -4080,6 +4281,20 @@ function openForm(kind, anchorId){
     `<button type="button" data-pos="older" aria-pressed="false">Before ${esc(anchor.name.split(' ')[0])}</button>` +
     `<button type="button" data-pos="younger" aria-pressed="true">After</button></div>`;
 
+  /* WHOSE CHILD a new brother or sister is — asked, not assumed.
+
+     Only when the anchor has parents recorded, because that is the only case
+     where there is an assumption to make. With no parents on record the two
+     simply share whoever theirs turn out to be, and a question there would be
+     friction with no answer behind it. */
+  const shares = kind === 'sibling' ? parentageOptions(anchorId) : [];
+  const whose = shares.length < 2 ? '' :
+    `<p class="lbl">Whose child</p><div class="seg col" id="fWhose">` +
+    shares.map((o, i) =>
+      `<button type="button" data-share="${esc(o.key)}" aria-pressed="${i === 0}">` +
+      `${esc(o.label)}</button>`).join('') +
+    `</div>`;
+
   // Somebody who married more than once needs to say whose child this is.
   const marriages = unionsOf(anchorId);
   const withWho = (kind !== 'child' || marriages.length < 2) ? '' :
@@ -4099,7 +4314,7 @@ function openForm(kind, anchorId){
       `<button type="button" data-sex="f" aria-pressed="false">She</button>` +
       `<button type="button" data-sex="m" aria-pressed="false">He</button>` +
       `<button type="button" data-sex="" aria-pressed="true">—</button></div>` +
-    order + withWho +
+    order + whose + withWho +
     `<input id="fTotem" class="fld" placeholder="Totem / mutupo (optional)" autocomplete="off">` +
     `<div class="row">` +
       `<input id="fBorn" class="fld" placeholder="Born" autocomplete="off">` +
@@ -4216,6 +4431,7 @@ function submitForm(){
   const before = screenOf(anchorId);
   const id = grow(kind, anchorId, name, sex, totem, {
     position:pick('fOrder', 'pos'), unionId:pick('fWith', 'union'),
+    share:pick('fWhose', 'share'),
     born:$('fBorn').value, died:$('fDied').value
   });
   closeForm();
@@ -4225,7 +4441,14 @@ function submitForm(){
   bringIntoView(id);                      // …and the new one is never off-screen
   revealBuds();                           // …nor are the choices around them
   save();
-  say(`${name} added as ${LABEL[kind]} ${state.people[anchorId].name}.`);
+  // For a sibling, say WHOSE child — the whole point of asking was that the
+  // answer is not obvious, so it is worth confirming what went in.
+  const share = pick('fWhose', 'share');
+  const chosenLabel = share
+    ? (parentageOptions(anchorId).find(o => o.key === share) || {}).label : null;
+  say(chosenLabel && kind === 'sibling'
+    ? `${name} added as ${LABEL[kind]} ${state.people[anchorId].name} — ${chosenLabel.toLowerCase()}.`
+    : `${name} added as ${LABEL[kind]} ${state.people[anchorId].name}.`);
 }
 
 /* Growing re-flows the whole tree. Pin the person you grew from to the same
@@ -5046,6 +5269,22 @@ function diffOps(was, now){
 
   const ref = id => refOf[id] || id;
 
+  /* MOVING A CHILD FROM ONE MARRIAGE TO ANOTHER — the order these come out in
+     decides whether it works at all.
+
+     A person can be a child of exactly one union: union_children.person_id is
+     the primary key, which is how the one-set-of-parents rule is made
+     unbreakable rather than merely checked. So addChild REFUSES somebody who
+     already has parents recorded, and a move has to arrive as the removal
+     first and the addition second.
+
+     A single pass over the unions cannot promise that — whether the removal
+     or the addition comes first depends on which union happens to be walked
+     first. So every removal is collected here and emitted before every
+     addition, which is the only order a move can succeed in and is harmless
+     for everything else. */
+  const childAdds = [], childDrops = [], reorders = [];
+
   // ---- unions ----
   for (const uid of Object.keys(now.unions)){
     const u = now.unions[uid], b = was.unions[uid];
@@ -5054,7 +5293,7 @@ function diffOps(was, now){
       refOf[uid] = r;
       ops.push({ op:'addUnion', ref:r });
       u.partners.forEach(x => ops.push({ op:'addPartner', unionId:r, personId:ref(x) }));
-      u.children.forEach(x => ops.push({ op:'addChild',   unionId:r, personId:ref(x) }));
+      u.children.forEach(x => childAdds.push({ op:'addChild', unionId:r, personId:ref(x) }));
       continue;
     }
     for (const x of u.partners){
@@ -5064,10 +5303,10 @@ function diffOps(was, now){
       if (!u.partners.includes(x)) ops.push({ op:'removePartner', unionId:uid, personId:x });
     }
     for (const x of u.children){
-      if (!b.children.includes(x)) ops.push({ op:'addChild', unionId:uid, personId:ref(x) });
+      if (!b.children.includes(x)) childAdds.push({ op:'addChild', unionId:uid, personId:ref(x) });
     }
     for (const x of b.children){
-      if (!u.children.includes(x)) ops.push({ op:'removeChild', unionId:uid, personId:x });
+      if (!u.children.includes(x)) childDrops.push({ op:'removeChild', unionId:uid, personId:x });
     }
     // Same members, different order: birth order is real information, so it
     // travels as its own op rather than as a remove-and-re-add that would
@@ -5075,9 +5314,14 @@ function diffOps(was, now){
     const kept = u.children.filter(x => b.children.includes(x));
     const before = b.children.filter(x => u.children.includes(x));
     if (kept.length > 1 && kept.join() !== before.join()){
-      ops.push({ op:'reorderChildren', unionId:uid, orderedIds:u.children.map(ref) });
+      reorders.push({ op:'reorderChildren', unionId:uid, orderedIds:u.children.map(ref) });
     }
   }
+
+  // Removals, then additions, then the orders they settle into. A reorder
+  // names every child of a union, so it has to come after the ones being
+  // added have arrived.
+  ops.push(...childDrops, ...childAdds, ...reorders);
 
   // A union that vanished locally: only merge does this, and only for unions
   // it has already emptied. There is no removeUnion op — an empty union is
@@ -5202,6 +5446,49 @@ function remapId(from, to){
   if (meId === from){ meId = to; try { localStorage.setItem(ME_KEY, to); } catch (e) {} }
   if (sel === from) sel = to;
   if (fresh.has(from)){ fresh.delete(from); fresh.add(to); }
+
+  /* AND ANYTHING ON SCREEN THAT IS HOLDING AN ID.
+
+     A panel is built once and read when it is submitted, and a save can land
+     in between — which is exactly when ids change. Everything above follows
+     the rename; a form that captured the old id does not, and by the time it
+     is read that id may have been handed to somebody else entirely.
+
+     That is not hypothetical. It produced a union with one person as both
+     partner and child of it: a form offering "Sydney, by another mother"
+     captured Sydney's local id, a save renamed him, the next person minted
+     took the id Sydney had just vacated, and the panel then said the new
+     person was their own parent. The server refused it — the one-set-of-
+     parents rule caught it — and the whole batch was lost. */
+  if (pending && pending.anchorId === from) pending.anchorId = to;
+  rewriteHeldIds(from, to);
+}
+
+/* The ids a panel is holding, in its markup. Rewritten in place so that what
+   the person clicked still means who they clicked on.
+
+   Three shapes, because that is what the panels use: a bare id, an id behind
+   a one-letter kind ("p:" / "u:"), and a pair joined by a bar. */
+const HELD_ID_ATTRS = ['share', 'parents', 'union', 'keep', 'drop', 'link',
+                       'card', 'rm', 'not', 'vis'];
+
+function rewriteHeldIds(from, to){
+  const form = typeof document !== 'undefined' && document.getElementById
+    ? document.getElementById('form') : null;
+  if (!form || !form.querySelectorAll) return;
+  const swap = v =>
+    v === from ? to
+    : v === 'p:' + from ? 'p:' + to
+    : v === 'u:' + from ? 'u:' + to
+    : v.includes('|') ? v.split('|').map(x => x === from ? to : x).join('|')
+    : v;
+  for (const attr of HELD_ID_ATTRS){
+    for (const el of form.querySelectorAll(`[data-${attr}]`)){
+      const was = el.getAttribute(`data-${attr}`);
+      const now = swap(was);
+      if (now !== was) el.setAttribute(`data-${attr}`, now);
+    }
+  }
 }
 
 /* Re-read the tree, keeping where the reader is looking. */
