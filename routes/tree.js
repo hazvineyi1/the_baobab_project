@@ -10,7 +10,7 @@ const { bootstrap, fullTree, publicTree, publicPerson, changesSince, search,
 const { findDuplicates } = require('../db/duplicates');
 const { findRelatives, linksFor } = require('../db/crosstree');
 const { OpError } = require('../db/errors');
-const { requireOwnTree } = require('../auth');
+const { requireOwnTree, limiter, addressOf, limitKeyOf } = require('../auth');
 const access = require('../db/access');
 const audit = require('../db/audit');
 
@@ -62,6 +62,21 @@ const actorOf = req => String(req.get('x-muti-actor') || req.body?.by || '').sli
    instead (/family/:key); a blanket r.use() would silently do nothing for
    those three and read as though it had covered them. */
 const own = requireOwnTree('id');
+
+/* Starting a family is free to ask for and not free to do: a tree, a scrypt
+   hash, a session. Two limits rather than one, and the pair is the point.
+
+   Per SESSION is the one that bites first, and it is set where no person ever
+   reaches it. Per ADDRESS is the backstop, set far higher, because forty
+   relatives at a gathering share one wifi and each starting their own tree is
+   this project working rather than being abused — while somebody who does hold
+   a passcode should still not be able to loop sign-in-and-create from one
+   machine all afternoon.
+
+   This is the only rate limit on a WRITE in the project, and it is here rather
+   than on /ops because ops are what the family came to do. */
+const newFamilyLimit = limiter(20, 60 * 60 * 1000);
+const newFamilyPerAddress = limiter(100, 60 * 60 * 1000);
 
 module.exports = function treeRoutes(pool, homeTreeId = null) {
   const r = express.Router();
@@ -141,6 +156,15 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
      which is what the admin is for. */
   r.post('/trees', async (req, res) => {
     try {
+      const who = limitKeyOf(req), addr = addressOf(req);
+      if (newFamilyLimit.tooMany(who) || newFamilyPerAddress.tooMany(addr)) {
+        return res.status(429).json({
+          error: 'too_many_families',
+          message: 'That is several families started in a short time. Try again ' +
+                   'in an hour — the ones already started are untouched.'
+        });
+      }
+      newFamilyLimit.note(who); newFamilyPerAddress.note(addr);
       const name = String(req.body?.name || '').trim().slice(0, 200) || 'A family';
       const by = actorOf(req);
       const { rows } = await pool.query(

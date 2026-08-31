@@ -21,8 +21,19 @@ const { trigramAvailable } = require('./db/reads');
 const { ensureHomeTree } = require('./db/home');
 const { gate, requireAdmin } = require('./auth');
 const audit = require('./db/audit');
+const { securityHeaders, withNonce } = require('./security');
 
 const app = express();
+
+// Nothing about this server is worth advertising, and the version is a hint
+// about which flaws to try.
+app.disable('x-powered-by');
+
+/* Response headers, FIRST — before the public record, before the gate, before
+   anything that can answer a request. A header that is only on the routes
+   somebody remembered is a header this deployment does not have. */
+app.use(securityHeaders());
+
 app.use(express.json({ limit: '2mb' }));
 // The gate's own form posts as a form, not as JSON.
 app.use(express.urlencoded({ extended: false, limit: '4kb' }));
@@ -120,6 +131,10 @@ async function setupDatabase() {
     // means a failure here costs query speed rather than data, which is why
     // this never throws.
     await audit.ensurePartitions(pool);
+    // And keep them ahead of the calendar. Doing this only at boot means a
+    // process that runs for four months quietly starts writing every event
+    // into the default partition — see keepPartitionsAhead.
+    audit.keepPartitionsAhead(pool);
 
     // The relational API. Only available with a real database — the in-memory
     // fallback below exists so `npm start` works for a quick look, and it
@@ -345,7 +360,11 @@ app.get(['/', '/index.html'], (req, res, next) => {
   const proto = (req.headers['x-forwarded-proto'] || '').split(',')[0].trim() ||
                 (req.secure ? 'https' : 'http');
   const origin = req.headers.host ? `${proto}://${req.headers.host}` : '';
-  res.type('html').send(pageHtml.split('%ORIGIN%').join(origin));
+  // The nonce is per request, so this substitution is too — a cached page with
+  // a baked-in nonce would be a nonce an attacker can read off one response
+  // and reuse in the next.
+  res.type('html').send(
+    withNonce(pageHtml.split('%ORIGIN%').join(origin), req.cspNonce));
 });
 
 app.use(express.static(path.join(__dirname, 'public')));

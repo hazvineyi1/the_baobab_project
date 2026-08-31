@@ -108,8 +108,9 @@ server.js`, after `npm install dotenv`).
 ## Project layout
 
 ```
-server.js            Express server: the gate, then the API, then the page
+server.js            Express server: headers, the gate, the API, the page
 auth.js              The gate: family passcodes, invitations, the admin door
+security.js          Response headers, and the CSP nonce
 db/access.js         passcodes, sessions, invitations
 db/audit.js          the record of who did what, when and from where
 db/admin.js          what the keeper can see; db/appeals.js what they answer
@@ -197,6 +198,32 @@ answers "what happened this week" by reading this week, and dropping old
 history is `mw_drop_audit_before(...)` — dropping whole tables rather than
 deleting rows. Nothing calls it: how long to keep a record of who signed in is
 a decision for whoever runs the deployment.
+
+The partitions are kept ahead of the calendar by a daily check, not only at
+boot. That distinction is the difference between working and quietly not: a
+process that runs past the last month prepared starts writing every event into
+the default partition, nothing fails, nobody notices, and the queries this
+scheme exists to speed up stop being able to skip anything.
+
+### Headers, and what they are set by hand
+
+There is no `helmet`, deliberately — this app has two runtime dependencies and
+it is worth keeping it that way. `security.js` sets the same headers directly,
+with the reason for each one written beside it.
+
+The one that does real work is the **Content-Security-Policy**. Both pages have
+exactly one `<script>` and no inline event handlers anywhere, so that script
+carries a per-request nonce and everything else executable is refused: an
+injected `<script>` has no nonce and does not run. A policy with
+`'unsafe-inline'` on scripts would be decoration, which is why the test suite
+asserts it is not there — and asserts, against the shipped files, that no
+inline `onclick=` has crept in for the nonce to miss.
+
+`Referrer-Policy: no-referrer` matters more here than it usually would. An
+invitation is `/join/<token>` and the token is in the path, because the server
+has to see it. Without this, a browser following any outbound link from that
+page would hand the whole invitation to wherever it went. (The family key lives
+in the fragment and was never at risk; this is for the tokens that cannot.)
 
 ### Appeals
 

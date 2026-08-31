@@ -7,6 +7,7 @@
 // a family invite people into somebody else's tree.
 
 const express = require('express');
+const { limiter, addressOf, limitKeyOf } = require('../auth');
 const access = require('../db/access');
 const audit = require('../db/audit');
 const appeals = require('../db/appeals');
@@ -30,6 +31,17 @@ function familyOnly(req, res, next) {
     message: 'This needs to be done from inside the family whose tree it is about.'
   });
 }
+
+/* An invitation costs the server a random token and a row, and costs the
+   family nothing to make — exactly the shape of thing that gets left running
+   in a loop.
+
+   Counted per session, with a much larger per-address backstop, for the same
+   reason /trees is: a family gathering is one wifi and many people, and the
+   limit that protects the table must not be the one that stops the gathering.
+   Sixty an hour is more than any real family makes in a year. */
+const inviteLimit = limiter(60, 60 * 60 * 1000);
+const invitePerAddress = limiter(300, 60 * 60 * 1000);
 
 module.exports = function familyRoutes(pool) {
   const r = express.Router();
@@ -60,6 +72,15 @@ module.exports = function familyRoutes(pool) {
      one person's link without changing everybody else's. */
   r.post('/api/invites', familyOnly, async (req, res) => {
     try {
+      const who = limitKeyOf(req), addr = addressOf(req);
+      if (inviteLimit.tooMany(who) || invitePerAddress.tooMany(addr)) {
+        return res.status(429).json({
+          error: 'too_many_invites',
+          message: 'That is a lot of invitations at once. Try again in an hour — ' +
+                   'the ones you have already made still work.'
+        });
+      }
+      inviteLimit.note(who); invitePerAddress.note(addr);
       const by = whoami(req);
       const invite = await access.createInvite(pool, req.muti.treeId, {
         by, note: req.body?.note, days: req.body?.days, uses: req.body?.uses

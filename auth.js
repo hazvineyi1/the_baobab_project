@@ -159,6 +159,18 @@ function limiter(max, windowMs) {
   };
 }
 
+/* WHO a limit counts against, on a route that is already behind the gate.
+
+   The session, not the address — because a family gathering is forty
+   relatives on one hall's wifi, each starting their own tree, and a per-address
+   limit would refuse most of them at exactly the moment this project is
+   supposed to be working. A session is not free to make: it needs a passcode
+   or an invitation.
+
+   Callers pair this with a much larger per-address limit, so that somebody who
+   does hold a passcode cannot loop sign-in-and-create from one machine. */
+const limitKeyOf = req => req.muti?.session?.id || addressOf(req);
+
 const esc = s => String(s).replace(/[&<>"]/g, c =>
   ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
@@ -688,7 +700,7 @@ function requireOwnTree(paramName = 'id') {
 }
 
 module.exports = {
-  gate, requireAdmin, requireOwnTree,
+  gate, requireAdmin, requireOwnTree, limiter, addressOf, limitKeyOf,
   COOKIE, SESSION_DAYS, MAX_ATTEMPTS, WINDOW_MS, APPEAL_MAX,
   // exported for tests only
   _internals: { sameSecret, readCookie, legacySign, legacyValid, legacyIssue,

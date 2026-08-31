@@ -21,6 +21,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 
+const { withNonce } = require('../security');
 const adminDb = require('../db/admin');
 const access = require('../db/access');
 const audit = require('../db/audit');
@@ -54,7 +55,8 @@ module.exports = function adminRoutes(pool) {
   r.get('/admin', (req, res) => {
     fs.readFile(DASHBOARD, 'utf8', (err, html) => {
       if (err) return res.status(500).type('text').send('The dashboard is missing.');
-      res.type('html').send(html);
+      // Its one script carries the request's nonce, like the family's page.
+      res.type('html').send(withNonce(html, req.cspNonce));
     });
   });
 

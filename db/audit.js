@@ -175,9 +175,9 @@ async function events(pool, {
   };
 }
 
-/* Make sure this month and next month have partitions of their own.
-   Called at boot. Cheap, idempotent, and never fatal — the default partition
-   means a failure here costs query speed, not data. */
+/* Make sure the coming months have partitions of their own.
+   Cheap, idempotent, and never fatal — the default partition means a failure
+   here costs query speed, not data. */
 async function ensurePartitions(pool, log = console.log) {
   if (!pool) return;
   try {
@@ -190,4 +190,32 @@ async function ensurePartitions(pool, log = console.log) {
   }
 }
 
-module.exports = { record, from, events, ensurePartitions, clientIp, normaliseIp, uaOf, KINDS };
+// Once a day. Not "every month", because nothing here knows when a month
+// turns over and a timer that fires monthly is a timer that fires wrong after
+// one restart.
+const PARTITION_CHECK_MS = 24 * 60 * 60 * 1000;
+
+/* Keep the partitions ahead of the calendar for as long as this process runs.
+
+   THE BUG THIS EXISTS TO PREVENT, which is a slow one and therefore the kind
+   that ships. Partitions were prepared at boot for three months and never
+   again. A process that runs longer than that — which is the normal state of
+   a server nobody is deploying to — starts writing into the DEFAULT partition
+   instead. Nothing breaks and nothing is lost, so nobody notices; the queries
+   the dashboard runs just quietly stop being able to skip anything, and the
+   table they were meant to avoid reading is the one that grows fastest.
+
+   Daily, because a check costs one cheap statement and the thing it is
+   guarding against happens on a date nobody is watching. unref() so it never
+   holds a process open — a test that finished should exit, not wait a day. */
+function keepPartitionsAhead(pool, log = console.log) {
+  if (!pool) return null;
+  const timer = setInterval(() => {
+    ensurePartitions(pool, log).catch(() => {});
+  }, PARTITION_CHECK_MS);
+  if (typeof timer.unref === 'function') timer.unref();
+  return timer;
+}
+
+module.exports = { record, from, events, ensurePartitions, keepPartitionsAhead,
+                   clientIp, normaliseIp, uaOf, KINDS, PARTITION_CHECK_MS };
