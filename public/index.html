@@ -389,7 +389,11 @@ body{
    whose. */
 .pod .ttl.vantage{
   color:var(--gold); font-family:inherit; font-size:9px; font-weight:700;
-  letter-spacing:.13em; text-transform:uppercase;
+  letter-spacing:.1em; text-transform:uppercase;
+  /* A word may be trimmed to fit; a name may not. "Tonderai's words" cut to
+     "Tonderai's wo…" is the one label on this screen that has to be read
+     whole, since it is the one saying whose words all the others are. */
+  white-space:normal; line-height:1.3;
 }
 .pod .mk{position:absolute; left:9px; top:5px; font-size:10px; color:var(--gold-soft);}
 .pod .rm{
@@ -1820,7 +1824,13 @@ function whyNotNamed(who, tid){
 
   // Two candidates, one of two words, and only a birth year to choose.
   if (r.choice){
-    const need = [who, tid].filter(x => birthYear(x) === null);
+    /* Usually the two people being named. Not always: a sister's husband is
+       Babamukuru or Babamudiki depending on how old HER sister is, and his own
+       birth year has nothing to do with it — so a choice can say which pair
+       the age question is actually about, and this sends whoever is reading to
+       the record that would settle it rather than to the wrong one. */
+    const pair = Array.isArray(r.between) ? r.between : [who, tid];
+    const need = pair.filter(x => birthYear(x) === null);
     return {
       text: need.length
         ? `The word is ${r.choice} — which one depends on who is older. ` +
@@ -2191,6 +2201,55 @@ function marriedIn(who, tid){
       if (them.sex === 'm') return { term:'Mukwasha', why:"your daughter's or son's husband" };
     }
 
+    /* A SISTER'S HUSBAND. Two different words depending on who is asking, and
+       the family gave both:
+
+         "Older sisters husband is babamukuru, younger sisters husband is
+          babamudiki... To the brother the sisters husband is always mukwasha."
+
+       To a WOMAN he is a father — Babamukuru if the sister is senior to her,
+       Babamudiki if she is junior — and it is worth seeing why, because it is
+       the same rule that makes her sister's children her own: if those are her
+       children, the man who fathered them stands where a father stands, and
+       the grading follows the sister he married. She has a second word for him
+       as well; see overlaps().
+
+       To a MAN he is Mukwasha, always, ungraded — the same word as a
+       daughter's husband, and for the same reason: he is the man who married
+       out of this house, and how old his wife is has nothing to do with it.
+
+       This was DESCRIBED and not named until the family said the word. The
+       comment that stood here said a word invented for him would be
+       indistinguishable on screen from one they actually use; it is named now
+       because they named it. */
+    const sis = sisterMarriedTo(who, tid);
+    if (sis){
+      if (sis.looking === 'man'){
+        return { term:'Mukwasha',
+                 shape:'inlaw:sisters-husband:man-looking',
+                 plain:"your sister's husband",
+                 why:`married to ${possess(sis.sister)} — a sister's husband is ` +
+                     `Mukwasha to her brother, whatever her age` };
+      }
+      if (sis.undecided){
+        return { term:null, choice:'Babamukuru or Babamudiki',
+                 // Whose year is missing is the SISTER's, not his. Without
+                 // this the app would send somebody to fill in a birth year on
+                 // the wrong record.
+                 between:[who, sis.sister],
+                 shape:'inlaw:sisters-husband:woman-looking:ungraded',
+                 plain:"your sister's husband",
+                 why:`married to ${possess(sis.sister)} — which word depends on ` +
+                     `whether she is older than you` };
+      }
+      return { term: sis.senior ? 'Babamukuru' : 'Babamudiki',
+               shape:`inlaw:sisters-husband:woman-looking:${sis.senior ? 'senior' : 'junior'}`,
+               plain:`your ${sis.senior ? 'older' : 'younger'} sister's husband`,
+               why:`married to ${possess(sis.sister)}, your ` +
+                   `${sis.senior ? 'older' : 'younger'} sister — her husband stands ` +
+                   `where a father stands, graded by her` };
+    }
+
     /* A BROTHER'S WIFE IS MUROORA TOO, which the glossary says in one line:
        "Muroora: Daughter-in-law / Brother's wife". Those look like two
        different relations in English and are one in Shona — she is the woman
@@ -2272,6 +2331,42 @@ function kinPath(who, tid){
   };
 }
 
+/* THE MAN MARRIED TO SOMEBODY YOU CALL A SISTER, and whether she is senior to
+   you — because the word for him turns on HER age, not on his.
+
+   Given by the family in one line: "Older sisters husband is babamukuru,
+   younger sisters husband is babamudiki... To the brother the sisters husband
+   is always mukwasha."
+
+   Which sibling counts as a sister is already answered by the word for her, so
+   this reads it off rather than working it out again. To a woman a sister is
+   the same-sex sibling — Mukoma if senior, Munin'ina if not. To a man she is
+   Hanzvadzi, the opposite-sex one. Checking that the partner is a woman is
+   what makes Hanzvadzi unambiguous here: a woman's Hanzvadzi is her brother
+   and is not this.
+
+   Classificatory sisters come along for free, and should: a mother's sister's
+   daughter IS Mukoma in this system, so her husband is Babamukuru by the same
+   rule and by the same word. */
+function sisterMarriedTo(who, tid){
+  const him = state.people[tid];
+  if (!him || him.sex !== 'm') return null;
+  for (const sp of partnersOf(tid)){
+    const she = state.people[sp];
+    if (!she || she.sex !== 'f') continue;
+    const r = relationship(who, sp, true);        // by blood, or she is nobody's sister
+    if (!r) continue;
+    if (r.term === 'Mukoma')     return { sister: sp, senior: true,  looking: 'woman' };
+    if (r.term === "Munin'ina")  return { sister: sp, senior: false, looking: 'woman' };
+    if (r.term === 'Hanzvadzi')  return { sister: sp, senior: null,  looking: 'man' };
+    // Two sisters and no birth years: the app knows he is one of the two words
+    // and not which, exactly as it knows that about them.
+    if (r.choice === "Mukoma or Munin'ina")
+      return { sister: sp, senior: null, looking: 'woman', undecided: true };
+  }
+  return null;
+}
+
 // Is this person married to my mother's brother?
 function marriedToMyMothersBrother(who, tid){
   for (const sp of partnersOf(tid)){
@@ -2339,6 +2434,29 @@ function overlaps(who, tid){
       why: "your mother's brother's daughter — a woman of your mother's house, " +
            "and not graded by age the way your mother's own sisters are"
     });
+  }
+
+  /* AND HE IS ALSO HER HUSBAND. The family's own words: "the secondary passive
+     relationship is also husband/murume."
+
+     Secondary, so it does not replace Babamukuru — it stands beside it, the
+     way Tete stands beside Mukoma above. It is the sisterhood saying itself
+     again from the other end: if her sister's children are her children, her
+     sister's husband is her husband in the same classificatory sense, and the
+     family marks it as the quieter of the two words rather than the wrong one.
+
+     A woman only. To a man his sister's husband is Mukwasha and that is the
+     whole of it — the family said "always". */
+  if (me.sex === 'f'){
+    const hers = sisterMarriedTo(who, tid);
+    if (hers && hers.looking === 'woman'){
+      out.push({
+        shape: 'overlap:sisters-husband:woman-looking:husband',
+        term: 'Murume',
+        why: `married to ${possess(hers.sister)}, your sister — and a sister's ` +
+             `husband is a husband to you as well, in the quieter sense`
+      });
+    }
   }
 
   const sekuru = marriedToMyMothersBrother(who, tid);

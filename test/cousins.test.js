@@ -293,19 +293,143 @@ section('the words for people married in, or married to');
   has(woman,  herBroWife, 'Muroora', 'to a woman as much as to a man');
   has(herDad, man,        'Mukwasha', "a daughter's husband is Mukwasha");
 
-  section("and a sister's husband is left DESCRIBED, because the list does not name him");
-  /* The mirror image of the brother's wife, and the family's list stops
-     before it. Inventing a word here would be the one thing this app must
-     never do — it would be indistinguishable, on screen, from a word the
-     family actually uses. */
-  eq('no word invented for him', w(man, sisHusband), []);
-  const gap = fe.kinTerms(man, sisHusband);
-  // Described in the family's own terms rather than translated back into
-  // English: "the husband of your Hanzvadzi" says exactly which relation is
-  // missing a word, which is what the family is being asked about.
-  check('but the app says what he is', /husband of your Hanzvadzi/.test(gap.base.plain || ''),
-        gap.base.plain || '(nothing)');
-  check('and has a shape to be taught one against', !!gap.base.shape, gap.base.shape);
+  section("a sister's husband — and to a man it is always the same word");
+  // "To the brother the sisters husband is always mukwasha." The same word as
+  // a daughter's husband, and for the same reason: he is the man who married
+  // out of this house, and how old his wife is has nothing to do with it.
+  has(man, sisHusband, 'Mukwasha', "a man's sister's husband is Mukwasha");
+}
+
+/* ── A SISTER'S HUSBAND, TO A WOMAN ────────────────────────────────────────
+   Given by the family in one line, and it carries three separate rules:
+
+     "Older sisters husband is babamukuru, younger sisters husband is
+      babamudiki. the secondary passive relationship is also husband/murume.
+      To the brother the sisters husband is always mukwasha."
+
+   The word turns on HER age, not on his — which is the part a kinship engine
+   gets wrong by reaching for the nearest birth year. And it is two words at
+   once, the second one quieter than the first, which is the ordinary shape of
+   this system rather than an edge case. */
+section("a sister's husband is graded by the sister, not by him");
+{
+  const fe = loadFrontend();
+  const P = (n, s, b) => fe.addPerson(n, s, 'Nzou', String(b), '');
+  const gf = P('Gf', 'm', 1920), gm = P('Gm', 'f', 1925);
+  const older   = P('Older sister',   'f', 1970);
+  const me      = P('Me',             'f', 1975);
+  const younger = P('Younger sister', 'f', 1980);
+  const brother = P('Brother',        'm', 1978);
+  fe.addUnion([gf, gm], [older, me, younger, brother]);
+  // Deliberately the wrong way round from their wives: the husband of the
+  // OLDER sister is the YOUNGER man. If the engine were reading his age
+  // instead of hers, this is where it would show.
+  const hOlder   = P('Husband of the older sister',   'm', 1982);
+  const hYounger = P('Husband of the younger sister', 'm', 1965);
+  fe.addUnion([older, hOlder], []);
+  fe.addUnion([younger, hYounger], []);
+
+  const w = (a, b) => { const k = fe.kinTerms(a, b);
+                        return k && k.list.length ? k.list.map(t => t.term) : []; };
+
+  eq("her older sister's husband is Babamukuru", w(me, hOlder)[0], 'Babamukuru');
+  eq("her younger sister's husband is Babamudiki", w(me, hYounger)[0], 'Babamudiki');
+  check('and it is HER age that decided it, not his — he is the younger man',
+        w(me, hOlder)[0] === 'Babamukuru', w(me, hOlder).join(' + '));
+
+  section('and he is her husband too, in the quieter sense');
+  // "the secondary passive relationship is also husband/murume" — secondary,
+  // so it stands beside Babamukuru rather than replacing it.
+  eq('both words, in that order', w(me, hOlder), ['Babamukuru', 'Murume']);
+  eq('and for the younger one as well', w(me, hYounger), ['Babamudiki', 'Murume']);
+
+  section('to her brother, the same two men are one word');
+  eq('always Mukwasha', w(brother, hOlder), ['Mukwasha']);
+  eq('for both of them', w(brother, hYounger), ['Mukwasha']);
+  check('and never graded — no Babamukuru anywhere in it',
+        !w(brother, hOlder).concat(w(brother, hYounger)).some(t => /^Baba/.test(t)));
+
+}
+
+section('a classificatory sister is a sister, so her husband is too');
+{
+  // Her mother's sister's daughter IS Mukoma in this system — the rule reads
+  // the word rather than the parentage, so this follows without being said
+  // separately, which is the point of reading the word.
+  const fe = loadFrontend();
+  const P = (n, s, b) => fe.addPerson(n, s, 'Nzou', String(b), '');
+  const mgf = P('Mgf', 'm', 1918), mgm = P('Mgm', 'f', 1922);
+  const maunt = P('Mothers sister', 'f', 1945), mum = P('Mum', 'f', 1948);
+  fe.addUnion([mgf, mgm], [maunt, mum]);
+  const dad = P('Dad', 'm', 1946);
+  const me = P('Me', 'f', 1975);
+  fe.addUnion([mum, dad], [me]);
+  const uncle = P('Her husband', 'm', 1943);
+  const cousin = P('Mothers sisters daughter', 'f', 1968);
+  fe.addUnion([maunt, uncle], [cousin]);
+  const hCousin = P('The cousin\'s husband', 'm', 1966);
+  fe.addUnion([cousin, hCousin], []);
+
+  const w = (a, b) => { const k = fe.kinTerms(a, b);
+                        return k && k.list.length ? k.list.map(t => t.term) : []; };
+  check('she is Mukoma', w(me, cousin).includes('Mukoma'), w(me, cousin).join(' + '));
+  check('so her husband is Babamukuru', w(me, hCousin).includes('Babamukuru'),
+        w(me, hCousin).join(' + '));
+}
+
+section('with no birth years the app says WHICH of the two, and whose year it needs');
+{
+  /* THE BUG THIS EXISTS TO PREVENT. The word depends on the SISTER's age, so
+     the record that would settle it is hers. Sending somebody to fill in a
+     birth year on the husband — the other person in the pair being named, and
+     the obvious guess — would be advice that cannot possibly work.
+
+     Half-sisters, because two children of one marriage are always settled by
+     their place in the row and there is nothing left to be undecided about.
+     Across two marriages there is no row to read, and the years are the only
+     evidence there could be. */
+  const fe = loadFrontend();
+  const Q = (n, s, b) => fe.addPerson(n, s, 'Nzou', b, '');
+  const father = Q('Father', 'm', '1940');
+  const w1 = Q('First wife', 'f', '1945'), w2 = Q('Second wife', 'f', '1950');
+  const her = Q('Her', 'f', '');
+  const sis = Q('Half sister, no year', 'f', '');
+  fe.addUnion([father, w1], [her]);
+  fe.addUnion([father, w2], [sis]);
+  const husband = Q('Her half sister\'s husband', 'm', '1970');
+  fe.addUnion([sis, husband], []);
+
+  eq('the sisters themselves are undecided', (fe.kinTerms(her, sis).list[0] || {}).term,
+     "Mukoma or Munin'ina");
+  const k = fe.kinTerms(her, husband);
+  eq('so he is too, and it says which two words', (k.list[0] || {}).term,
+     'Babamukuru or Babamudiki');
+  const gap = fe.whyNotNamed(her, husband);
+  check('and says an age decides it', /depends on who is older/.test(gap.text || ''),
+        gap.text);
+  // Both of THEIR years are missing here, so either is a fair first stop; what
+  // matters is that it is one of them and never him.
+  check('and points at one of the two women whose ages decide it',
+        gap.fix === sis || gap.fix === her, gap.fix);
+  check('not at him — his year is recorded and settles nothing',
+        gap.fix !== husband, 'it sent them to the husband');
+  check('naming the sister, who is not one of the two being named',
+        /Half/.test(gap.text) || /Her/.test(gap.text), gap.text);
+
+  section('and when only HER year is missing, that is the record it names');
+  const fe3 = loadFrontend();
+  const R = (n, s, b) => fe3.addPerson(n, s, 'Nzou', b, '');
+  const f3 = R('Father', 'm', '1940');
+  const a3 = R('First wife', 'f', '1945'), b3 = R('Second wife', 'f', '1950');
+  const me3 = R('Me', 'f', '1975');
+  const sis3 = R('Half sister with no year', 'f', '');
+  fe3.addUnion([f3, a3], [me3]);
+  fe3.addUnion([f3, b3], [sis3]);
+  fe3.addUnion([sis3, R('Her husband', 'm', '1970')], []);
+  const him3 = fe3.getState().people[sis3] &&
+    (fe3.unionsOf(sis3).find(u => u.partners.length === 2) || {}).partners.find(x => x !== sis3);
+  const gap3 = fe3.whyNotNamed(me3, him3);
+  eq('exactly her', gap3.fix, sis3);
 }
 
 /* ── THE WORD ON THE CARD ──────────────────────────────────────────────────
