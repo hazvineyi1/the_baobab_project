@@ -363,5 +363,125 @@ const why  = (fe, a, b) => { const t = shown(fe, a, b); return t ? t.why : ''; }
     eq('a missing year is not a disagreement', fe.seniorityConflicts(), []);
   }
 
+  // ── what the tree says when it cannot say a word ─────────────────────────
+  section('NOBODY IS EVER NAMED AS THEIR OWN ANCESTOR');
+  /* Reported: "how is my older sisters son being identified as muzukuru and
+     ancestor?" — the trace read "your ancestor Hazvineyi Belinda Musoni's
+     side", and Hazvineyi is the person reading it.
+
+     The side a link runs through is described by whoever it runs through, and
+     when that is the reader themselves the ancestor phrasing is simply wrong.
+     Being told you are your own ancestor is not a small infelicity: it is the
+     app appearing not to know who you are. */
+  {
+    const fe = loadFrontend();
+    const dad = fe.addPerson('Sydney Kanzara', 'm', 'Mwendamberi', '1940', '');
+    const mum = fe.addPerson('Evelyn Mandaba', 'f', 'Moyondizvo', '1954', '');
+    const bertha = fe.addPerson('Bertha Dadirai', 'f', 'Mwendamberi', '1975', '');
+    const haz = fe.addPerson('Hazvineyi Belinda', 'f', 'Mwendamberi', '1979', '');
+    const terence = fe.addPerson('Terence Kurauwone', 'm', 'Mwendamberi', '1981', '');
+    fe.addUnion([dad, mum], [bertha, haz, terence]);
+    const tw = fe.addPerson('Janet', 'f', 'Moyo', '1985', '');
+    const munya = fe.addPerson('Munyaradzi Atticus', 'm', 'Mwendamberi', '2013', '');
+    fe.addUnion([terence, tw], [munya]);
+
+    const trace = why(fe, haz, munya);
+    check('the trace does not call her her own ancestor',
+          !/your ancestor Hazvineyi/.test(trace), trace);
+    check('it says the side is her own', /your own/.test(trace), trace);
+  }
+
+  section('and her brother\'s son calls her Tete, not something about ancestors');
+  {
+    const fe = loadFrontend();
+    const dad = fe.addPerson('Sydney', 'm', 'Nzou', '1940', '');
+    const mum = fe.addPerson('Evelyn', 'f', 'Shava', '1954', '');
+    const haz = fe.addPerson('Hazvineyi', 'f', 'Nzou', '1979', '');
+    const terence = fe.addPerson('Terence', 'm', 'Nzou', '1981', '');
+    fe.addUnion([dad, mum], [haz, terence]);
+    const tw = fe.addPerson('Janet', 'f', 'Moyo', '1985', '');
+    const munya = fe.addPerson('Munyaradzi', 'm', 'Nzou', '2013', '');
+    fe.addUnion([terence, tw], [munya]);
+    eq('she is his Tete', term(fe, munya, haz), 'Tete');
+    eq('and he is her Muzukuru', term(fe, haz, munya), 'Muzukuru');
+  }
+
+  section('"NOT NAMED YET" SAYS WHAT IT IS WAITING FOR');
+  /* Reported: "what does it mean not named yet?"
+
+     It is almost never that Shona has no word. It is that the tree has not
+     been told something small, and the family reading it cannot see which
+     small thing. Every case now names the missing fact AND the person it is
+     missing from. */
+  {
+    const fe = loadFrontend();
+    const dad = fe.addPerson('Sydney', 'm', 'Nzou', '1940', '');
+    const mum = fe.addPerson('Evelyn', 'f', 'Shava', '1954', '');
+    const bertha = fe.addPerson('Bertha Dadirai', 'f', 'Nzou', '1975', '');
+    // Her own record says nothing about whether she is a he or a she.
+    const haz = fe.addPerson('Hazvineyi Belinda', '', 'Nzou', '1979', '');
+    fe.addUnion([dad, mum], [bertha, haz]);
+
+    eq('with no sex recorded there is no word', term(fe, haz, bertha), null);
+    const gap = fe.whyNotNamed(haz, bertha);
+    check('but there is a reason', !!gap);
+    check('which names the missing fact', /he or a she/.test(gap.text), gap.text);
+    check('and the person it is missing from',
+          /Hazvineyi/.test(gap.text), gap.text);
+    eq('and points at the record that would supply it', gap.fix, haz);
+    eq('saying which field', gap.need, 'sex');
+  }
+
+  section('and recording it names the pair, from both sides');
+  {
+    const fe = loadFrontend();
+    const dad = fe.addPerson('Sydney', 'm', 'Nzou', '1940', '');
+    const mum = fe.addPerson('Evelyn', 'f', 'Shava', '1954', '');
+    const bertha = fe.addPerson('Bertha', 'f', 'Nzou', '1975', '');
+    const haz = fe.addPerson('Hazvineyi', '', 'Nzou', '1979', '');
+    fe.addUnion([dad, mum], [bertha, haz]);
+    const bh = fe.addPerson('Joseph', 'm', 'Shava', '1970', '');
+    const syd = fe.addPerson('Sydney Kurauwone', 'm', 'Shava', '1997', '');
+    fe.addUnion([bertha, bh], [syd]);
+
+    eq('before: no word for her older sister', term(fe, haz, bertha), null);
+    eq('before: her sister\'s son is only Muzukuru', term(fe, haz, syd), 'Muzukuru');
+
+    fe.getState().people[haz].sex = 'f';
+
+    eq('after: her older sister is Mukoma', term(fe, haz, bertha), 'Mukoma');
+    eq('after: and her sister\'s son is her son', term(fe, haz, syd), 'Mwanakomana');
+    eq('after: nothing is waiting on anything', fe.whyNotNamed(haz, bertha), null);
+  }
+
+  section('a missing birth year is reported as itself, not as a missing sex');
+  {
+    const fe = loadFrontend();
+    const father = fe.addPerson('Sydney', 'm', 'Nzou', '1940', '');
+    const w1 = fe.addPerson('Evelyn', 'f', 'Shava', '1954', '');
+    const w2 = fe.addPerson('Rudo', 'f', 'Shava', '1961', '');
+    // Half brothers, so birth order cannot settle it and no years are given.
+    const a = fe.addPerson('Takunda', 'm', 'Nzou', '', '');
+    const b = fe.addPerson('Josiah', 'm', 'Nzou', '', '');
+    fe.addUnion([father, w1], [a]);
+    fe.addUnion([father, w2], [b]);
+    const gap = fe.whyNotNamed(a, b);
+    check('it is about the years', /older/.test(gap.text), gap.text);
+    eq('and says so', gap.need, 'born');
+    check('naming both candidates', /Mukoma or Munin/.test(gap.text), gap.text);
+  }
+
+  section('and two strangers are told plainly that nothing joins them');
+  {
+    const fe = loadFrontend();
+    const a = fe.addPerson('A', 'f', 'Nzou', '1970', '');
+    const b = fe.addPerson('B', 'm', 'Shava', '1972', '');
+    const gap = fe.whyNotNamed(a, b);
+    eq('no missing field to blame', gap.need, 'people');
+    check('it says what is actually missing',
+          /add the people in between/.test(gap.text), gap.text);
+    eq('and offers no record to open, because there is none', gap.fix, null);
+  }
+
   report();
 })();

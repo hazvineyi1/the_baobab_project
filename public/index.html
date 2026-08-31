@@ -1767,6 +1767,55 @@ function forgetTerm(shape){
   delete state.lexicon[shape];
 }
 
+/* WHY A PAIR HAS NO WORD YET — and what would give it one.
+
+   "Not named yet" is a dead end if it stops there. It is almost never that
+   Shona has no word; it is that this tree has not been told something small,
+   and the family reading it cannot see WHICH small thing.
+
+   Every case here is one missing fact, named, with the person it is missing
+   from. The commonest by far is a sex nobody has recorded: without it the app
+   cannot choose between Mukoma and Munin'ina, or know that a woman's sister's
+   children are her children — so a person whose own record says nothing about
+   whether they are a he or a she loses half their words at once. */
+function whyNotNamed(who, tid){
+  const r = relationship(who, tid);
+  if (!r) return null;
+  const firstOf = id => (state.people[id].name || '').split(' ')[0] || 'they';
+  const list = ids => ids.map(firstOf).join(' and ');
+
+  // Two candidates, one of two words, and only a birth year to choose.
+  if (r.choice){
+    const need = [who, tid].filter(x => birthYear(x) === null);
+    return {
+      text: need.length
+        ? `The word is ${r.choice} — which one depends on who is older. ` +
+          `${list(need)}'s birth year is not recorded.`
+        : `The word is ${r.choice} — which one depends on who is older.`,
+      fix: need[0] || null, need: 'born'
+    };
+  }
+
+  if (!r.term){
+    const need = [who, tid].filter(x => !state.people[x].sex);
+    if (need.length){
+      return {
+        text: `The word depends on whether ${list(need)} ` +
+              `${need.length > 1 ? 'are' : 'is'} a he or a she, and that is not ` +
+              `recorded. Add it and the word follows.`,
+        fix: need[0], need: 'sex'
+      };
+    }
+    if (/no traced link/.test(r.why || '')){
+      return { text: 'Nothing joins them in this tree yet — add the people in between.',
+               fix: null, need: 'people' };
+    }
+    return { text: 'This app has no word for it. If your family uses one, name it below.',
+             fix: null, need: 'word' };
+  }
+  return null;
+}
+
 /* The term for `tid` as seen by `who`, with the trace that produced it.
  
    A thin wrapper: the engine below is unchanged, and anything it names is
@@ -1903,7 +1952,17 @@ function derive(who, tid, byBloodOnly){
     const known = myLink.sex && tgLink.sex;
     const cross = best.myUp >= 1 && known && myLink.sex !== tgLink.sex;
     const senior = olderThan(best.tgLink, best.myLink);   // two siblings: always answerable
-    const via = best.myUp === 1
+    /* WHOSE SIDE THE LINK RUNS THROUGH.
+
+       myUp === 0 means it runs through the person asking — they are
+       themselves a child of the union both lines meet at. This used to fall
+       into the ancestor phrasing and so told somebody that the side was
+       "your ancestor Hazvineyi Belinda Musoni's", where Hazvineyi is the
+       person reading it. Being named as your own ancestor is not a small
+       infelicity: it is the app appearing not to know who you are. */
+    const via = best.myUp === 0
+      ? 'your own'
+      : best.myUp === 1
       ? (myLink.sex === 'f' ? "your mother's" : myLink.sex === 'm' ? "your father's" : "your parent's")
       : `your ancestor ${myLink.name}'s`;
 
@@ -4200,8 +4259,16 @@ function kinVerdict(from, to, how){
           `${esc(kinName(from))} at once. That is ordinary here, and it depends on ` +
           `whether ${esc(kinName(from))} is a man or a woman.</p>` : '') +
       `</div>`
-    : `<p class="relline none"><b>Not named</b><span>${esc(kinName(to))} is ` +
-      `${esc(kinName(from))}'s relative — ${esc(r.why)}</span></p>`);
+    : (() => {
+        const gap = whyNotNamed(from, to);
+        return `<p class="relline none"><b>Not named yet</b><span>` +
+          `${esc(kinName(to))} is ${esc(kinName(from))}'s relative — ${esc(r.why)}` +
+          `${gap ? `<br>${esc(gap.text)}` : ''}</span></p>` +
+          (gap && gap.fix
+            ? `<div class="row"><button type="button" class="btn ghost wide" ` +
+              `data-fix="${esc(gap.fix)}">Open ${esc(state.people[gap.fix].name)}</button></div>`
+            : '');
+      })());
 
   // Where the app has a shape but no word for it, ask. This is the whole
   // mechanism: it never guesses, and it never stays ignorant either.
@@ -4426,6 +4493,7 @@ function openKinship(){
     inp.addEventListener('focus', show);
   });
   el.querySelectorAll('[data-ask]').forEach(b => b.onclick = () => openCard(b.dataset.ask));
+  el.querySelectorAll('[data-fix]').forEach(b => b.onclick = () => openCard(b.dataset.fix));
   el.querySelectorAll('.teach').forEach(box => {
     const input = box.querySelector('.teachterm');
     const why = box.querySelector('.teachwhy');
@@ -4468,8 +4536,11 @@ function openCard(id){
     `<p class="cap">${esc(p.name)}</p>` +
     (rel ? `<p class="lbl">To you</p>` + (() => {
       const k = kinTerms(meId, id);
-      if (!k || !k.list.length) return `<p class="relline none"><b>Not named</b>` +
-        `<span>${esc(rel.why)}</span></p>`;
+      if (!k || !k.list.length){
+        const gap = whyNotNamed(meId, id);
+        return `<p class="relline none"><b>Not named yet</b><span>${esc(rel.why)}` +
+          `${gap ? `<br>${esc(gap.text)}` : ''}</span></p>`;
+      }
       return k.list.map((t, i) =>
         `<p class="relline${i ? ' also' : ''}"><b>${esc(t.term)}</b>` +
         `<span>${i ? 'and also — ' : ''}${esc(t.why)}</span></p>`).join('');
@@ -5084,11 +5155,16 @@ function relationRibbon(spot){
   // than picking one and pretending it is the whole answer. Tapping opens the
   // card, which lists them.
   const extra = k.list.length - 1;
-  return `<div class="term${first ? '' : ' none'}" data-card="${sel}" role="button" tabindex="0"` +
+  // With no word, the ribbon says what is missing rather than repeating the
+  // trace — and tapping it opens the record that would supply it, which is
+  // usually somebody else's card rather than the one being looked at.
+  const gap = first ? null : whyNotNamed(meId, sel);
+  const opens = gap && gap.fix ? gap.fix : sel;
+  return `<div class="term${first ? '' : ' none'}" data-card="${opens}" role="button" tabindex="0"` +
     ` style="left:${spot[0].toFixed(1)}px; top:${spot[1].toFixed(1)}px">` +
     `<b>${esc(first ? first.term : (k.base.choice || 'Not named yet'))}` +
     `${extra > 0 ? `<em>+${extra}</em>` : ''}</b>` +
-    `<span>${esc(first ? first.why : k.base.why)}` +
+    `<span>${esc(first ? first.why : (gap ? gap.text : k.base.why))}` +
     `${extra > 0 ? ` · and ${extra} more` : ''}</span></div>`;
 }
 
