@@ -631,10 +631,26 @@ const HANDLERS = {
     // precisely so that a union with children can never vanish under them.
     const collapsed = await collapseDuplicateUnions(client, treeId, keepId);
 
+    /* A SESSION VIEWING AS THE FOLDED RECORD FOLLOWS THE ONE THAT STAYED.
+
+       Sessions carry who is viewing, and every term the app produces is
+       reckoned from that person. Without this, tidying away your own duplicate
+       leaves you signed in as a record that has just been set aside: the app
+       asks who you are again, in the middle of the one act that was supposed
+       to be housekeeping. It is the same person — that is what a merge
+       asserts — so the session says so too.
+
+       In this transaction, so a merge that rolls back does not move anybody. */
+    const { rowCount: moved } = await client.query(
+      `UPDATE sessions SET person_id = $2
+        WHERE person_id = $1 AND revoked_at IS NULL`, [mergeId, keepId]);
+
     await touchPerson(client, keepId);
     await logChange(client, treeId, 'person', keepId, 'mergePeople',
-                    { keepId, mergeId, filled, collapsedUnions: collapsed }, actor);
-    return { keepId, mergeId, filled, collapsedUnions: collapsed };
+                    { keepId, mergeId, filled, collapsedUnions: collapsed,
+                      sessionsMoved: moved }, actor);
+    return { keepId, mergeId, filled, collapsedUnions: collapsed,
+             sessionsMoved: moved };
   }
 };
 

@@ -81,6 +81,44 @@ const newFamilyPerAddress = limiter(100, 60 * 60 * 1000);
 module.exports = function treeRoutes(pool, homeTreeId = null) {
   const r = express.Router();
 
+  /* WHO IS VIEWING, BEFORE ANYTHING IS RECKONED FROM THEM.
+
+     Every Shona term this app produces is reckoned from somebody. Amaiguru
+     and Amainini turn on whose mother is older; Tete and Sekuru on which side
+     of the family you stand; "my sister's children are my children" on
+     whether the person asking is a woman. A tree handed to a session that has
+     not said who it is, is a tree that will be described to nobody — which is
+     exactly what was happening, because the viewer used to be a line in the
+     browser's storage that a new phone answered as blank.
+
+     So the tree is not sent until the session has answered. The refusal
+     carries the ONE thing needed to answer it: id and name, and nothing else.
+     No dates, no totems, no marriages, no children — a roster is what the
+     question needs and the rest is what the answer unlocks.
+
+     Two cases go straight through, and both are the same case: there is
+     nobody to be. A family with no people in it yet has just been started by
+     whoever is asking, and a deployment with no gate has no session to carry
+     an answer. */
+  async function viewer(req, res, next) {
+    const s = req.muti?.session;
+    if (!s || s.scope !== 'family') return next();
+    if (s.personId) return next();
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, name FROM people
+          WHERE tree_id = $1 AND aside_at IS NULL
+          ORDER BY name LIMIT 2000`, [s.treeId]);
+      if (!rows.length) return next();
+      return res.status(428).json({
+        error: 'who_are_you',
+        message: 'Say who you are in this family. Every word this tree uses is ' +
+                 'reckoned from one person, so it has to know which one you are.',
+        people: rows
+      });
+    } catch (e) { return sendError(res, e); }
+  }
+
   /* Which family this visitor is in.
 
      THE SESSION DECIDES, not the deployment. Before per-family passcodes there
@@ -109,7 +147,7 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
      The page is an editor, not a viewer: it derives kinship, generations,
      duplicates and layout from the whole graph, and a partial graph gives
      wrong answers rather than missing ones. */
-  r.get('/tree/:id/tree', own, async (req, res) => {
+  r.get('/tree/:id/tree', own, viewer, async (req, res) => {
     try {
       res.json(await fullTree(pool, req.params.id));
     } catch (e) { sendError(res, e); }
@@ -259,6 +297,14 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
     try {
       const ops = Array.isArray(req.body) ? req.body : req.body?.ops;
       const result = await applyOps(pool, req.params.id, ops, actorOf(req));
+      /* A merge can move a session's viewer onto the record that stayed (see
+         mergePeople). The sessions cache holds who each session is, so it has
+         to be told — otherwise the person who just folded away their own
+         duplicate goes on being reckoned from a record that is now set aside,
+         for as long as the cache lasts. */
+      if ((ops || []).some(o => o && o.op === 'mergePeople')) {
+        access.forgetTree(req.params.id);
+      }
       // WHAT was done, coarsely. The `changes` table already holds every edit
       // in full; recording the detail again here would be two records of one
       // act that can disagree. This says a batch arrived, from where, and of

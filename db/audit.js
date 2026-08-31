@@ -30,6 +30,8 @@ const KINDS = Object.freeze([
   'gate.suspended',     // right passcode, family closed by the admin
   'session.revoked',
   'session.expired',
+  'session.identified',   // a session said who is viewing — every term is reckoned from them
+  'session.attested',     // an invitation named who it was for, and this session took it up
   'invite.created',
   'invite.accepted',
   'invite.rejected',    // expired, used up, revoked, or never existed

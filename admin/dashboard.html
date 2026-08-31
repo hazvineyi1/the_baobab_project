@@ -650,7 +650,14 @@ async function loadSessions() {
     tr.innerHTML =
       `<td>${s.scope === 'admin' ? '<span class="pill">the keeper</span>'
                                  : esc(s.tree_name || '—')}</td>` +
-      `<td><span class="pill">${esc(s.via || '—')}</span></td>` +
+      `<td><span class="pill">${esc(s.via || '—')}</span>` +
+        // WHETHER they have said who is viewing, never who. Every term the
+        // app shows is reckoned from one person, so a session that has not
+        // answered is one being shown a tree it cannot read — worth knowing
+        // when somebody says the words look wrong. Which relative they are is
+        // theirs, and the keeper does not see names from inside a family.
+        `${s.identified ? `<span class="pill">${s.person_via === 'invite'
+            ? 'named by a link' : 'said who'}</span>` : ''}</td>` +
       `<td>${esc(s.actor) || '—'}</td>` +
       `<td class="mono">${esc(s.last_ip || s.created_ip || '—')}</td>` +
       `<td>${ago(s.last_seen_at)}${dead ? ' <span class="pill bad">ended</span>' : ''}</td>` +

@@ -48,14 +48,58 @@ module.exports = function familyRoutes(pool) {
   const ctx = req => audit.from(req, { actor: whoami(req), sessionId: req.muti?.session?.id });
 
   /* Who this session is, which is what the page asks on load so it knows
-     which family it is showing and whether to offer the admin link. */
+     which family it is showing and whether to offer the admin link.
+
+     AND WHO IS VIEWING, which is the part the whole kinship engine rests on.
+     Every Shona term is reckoned from somebody: Amaiguru and Amainini turn on
+     whose mother is older, Tete and Sekuru on which side you stand, and "my
+     sister's children are my children" on whether the person asking is a
+     woman. There is no term without a viewer, and this is where the viewer
+     comes from now — the session, not a line in the browser's storage that a
+     new phone or a cleared cache silently answers differently. */
   r.get('/api/me', async (req, res) => {
     const s = req.muti?.session;
     if (!s) return res.status(401).json({ error: 'not_signed_in' });
     res.json({
       scope: s.scope, treeId: s.treeId || null, treeName: s.treeName || null,
-      handle: s.handle || null, via: s.via || '', expiresAt: s.expiresAt || null
+      handle: s.handle || null, via: s.via || '', expiresAt: s.expiresAt || null,
+      person: s.personId
+        ? { id: s.personId, name: s.personName || '', at: s.personSetAt || null,
+            // Said by somebody else, or said by this session about itself. The
+            // page shows the difference rather than presenting a claim as a
+            // fact.
+            via: s.personVia || 'self' }
+        : null
     });
+  });
+
+  /* SAY WHO IS VIEWING.
+
+     A family passcode is shared — that is what a family passcode is — so this
+     is a CLAIM, exactly like the `by` on every change in this project. It is
+     not authentication and nothing here treats it as any. What it buys is the
+     one thing kinship cannot do without: a person to reckon from. What makes
+     it more than a claim is an invitation made for a named relative, and a
+     session that arrived on one is refused here rather than allowed to
+     re-answer.
+
+     It is recorded, because it changes what every other answer means. */
+  r.post('/api/me/person', familyOnly, async (req, res) => {
+    try {
+      const raw = req.body?.personId;
+      // null clears it: somebody who marked the wrong person should be able to
+      // take it back rather than being stuck as their own cousin.
+      const personId = raw === null || raw === '' ? null : String(raw);
+      const done = await access.identify(pool, req.muti.session.id, personId,
+                                         { by: whoami(req) });
+      if (!done) return res.status(401).json({ error: 'not_signed_in' });
+      await audit.record(pool, { ...ctx(req), kind: 'session.identified', ok: true,
+        treeId: req.muti.treeId,
+        detail: { personId: done.personId, name: done.personName,
+                  wasPersonId: done.beforeId, wasName: done.beforeName } });
+      res.json({ person: done.personId
+        ? { id: done.personId, name: done.personName, via: 'self' } : null });
+    } catch (e) { fail(res, e); }
   });
 
   // ── invitations ──────────────────────────────────────────────────────────
@@ -83,18 +127,29 @@ module.exports = function familyRoutes(pool) {
       inviteLimit.note(who); invitePerAddress.note(addr);
       const by = whoami(req);
       const invite = await access.createInvite(pool, req.muti.treeId, {
-        by, note: req.body?.note, days: req.body?.days, uses: req.body?.uses
+        by, note: req.body?.note, days: req.body?.days, uses: req.body?.uses,
+        // Naming who a link is for costs the sender one tap and is the only
+        // thing in this project that makes "who is viewing" somebody else's
+        // word rather than the holder's own.
+        forPersonId: req.body?.forPersonId || null
       });
       await audit.record(pool, { ...ctx(req), kind: 'invite.created', ok: true,
         treeId: req.muti.treeId,
-        detail: { inviteId: invite.id, uses: invite.max_uses, note: invite.note } });
+        detail: { inviteId: invite.id, uses: invite.max_uses, note: invite.note,
+                  forPersonId: invite.for_person_id || null } });
       res.status(201).json({
         id: invite.id, expiresAt: invite.expires_at, uses: invite.max_uses,
         note: invite.note,
+        forPerson: invite.for_person_id
+          ? { id: invite.for_person_id, name: invite.forPersonName } : null,
         // A path, not a full URL: the server behind a proxy does not reliably
         // know what it is called from outside, and the page does.
         path: `/join/${invite.token}`,
-        notice: 'This link can only be shown once. Send it to the person it is for.'
+        notice: invite.for_person_id
+          ? `This link can only be shown once. It opens as ` +
+            `${invite.forPersonName}, so send it to them and to nobody else — ` +
+            `whoever follows it will be shown the family as they see it.`
+          : 'This link can only be shown once. Send it to the person it is for.'
       });
     } catch (e) { fail(res, e); }
   });

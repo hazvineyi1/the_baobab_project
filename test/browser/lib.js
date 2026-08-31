@@ -54,9 +54,42 @@ async function enter(page, url){
   return page;
 }
 
-const ready = page => page.waitForFunction(
-  () => { try { return store === 'shared' && !!treeId; } catch (e) { return false; } },
-  null, { timeout: 20000 });
+/* SAY WHO IS VIEWING, if the page is asking.
+
+   Since who-is-viewing moved onto the session, a family session that has not
+   answered is given a roster and a question instead of a tree — every word the
+   app produces is reckoned from one person, so a tree handed to nobody would
+   be described to nobody. Every suite here signs in fresh, so every suite
+   meets the question. Answering it with the first name on the list is what a
+   relative does, and it is what makes the rest of each suite exercise a tree
+   that is actually being read from somebody's side.
+
+   Returns the name it answered with, or null if nothing was asked — a family
+   with nobody in it yet has nobody to be, and goes straight through. */
+async function sayWhoYouAre(page, { timeout = 6000 } = {}){
+  const asked = await page.waitForSelector('#whoQ', { timeout }).catch(() => null);
+  if (!asked) return null;
+  const first = await page.$('#whoList [data-who]');
+  if (!first) return null;
+  const name = (await first.textContent()).trim();
+  /* The click can lose its element: answering goes to the server and the
+     panel is removed when it answers, so a suite that has ALREADY answered
+     and then calls ready() finds the panel on its way out. That is the answer
+     landing, not a failure — wait for it to be gone either way. */
+  await first.click().catch(() => {});
+  await page.waitForSelector('#whoQ', { state:'detached', timeout: 10000 });
+  return name;
+}
+
+const ready = async page => {
+  // Bounded short: most of the time nothing is asked and this is the cost of
+  // finding that out.
+  await sayWhoYouAre(page, { timeout: 3000 });
+  await page.waitForFunction(
+    () => { try { return store === 'shared' && !!treeId; } catch (e) { return false; } },
+    null, { timeout: 20000 });
+  return page;
+};
 
 const settled = page => page.waitForFunction(
   () => { try { return typeof store === 'string'; } catch (e) { return false; } },
@@ -81,4 +114,4 @@ const saved = page => page.waitForFunction(
   }, null, { timeout: 20000 });
 
 module.exports = { BASE, EXE, PASSPHRASE, openApp, enter, onlyThisOrigin,
-                   ready, settled, saved };
+                   ready, settled, saved, sayWhoYouAre };

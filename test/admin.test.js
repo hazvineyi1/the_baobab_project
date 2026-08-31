@@ -168,9 +168,69 @@ function client(server) {
   r = await one.go('/api/home');
   eq('which family they are in is decided by the session', r.body.treeId, nyamhunga.id);
 
+  /* WHO IS VIEWING, ASKED BEFORE THE TREE IS HANDED OVER.
+
+     Every term this app produces is reckoned from one person, so a tree sent
+     to a session that has not said which person it is, is a tree that will be
+     described to nobody. The refusal carries a roster — id and name — because
+     that is what the question needs; the dates, the marriages and the totems
+     are what the answer unlocks. */
+  r = await one.go(`/api/tree/${nyamhunga.id}/tree`);
+  eq('the tree is not handed over until they say who they are', r.status, 428);
+  eq('and it says which question is being asked', r.body.error, 'who_are_you');
+  check('with the names to answer it from', Array.isArray(r.body.people) &&
+        r.body.people.some(p => /Chenjerai/.test(p.name)), r.text.slice(0, 200));
+  check('and nothing else about them — no dates, no totem, no marriages',
+        Object.keys(r.body.people[0]).sort().join(',') === 'id,name',
+        Object.keys(r.body.people[0]).join(','));
+
+  const chenjerai = r.body.people.find(p => /Chenjerai/.test(p.name));
+  r = await one.go('/api/me/person', { method:'POST', json:{ personId: chenjerai.id } });
+  eq('saying so is accepted', r.status, 200);
+  eq('and it is their own claim, not somebody else\'s word', r.body.person.via, 'self');
+
+  r = await one.go('/api/me');
+  eq('the session carries it from then on', r.body.person.id, chenjerai.id);
+
   r = await one.go(`/api/tree/${nyamhunga.id}/tree`);
   eq('they can read their own tree', r.status, 200);
   check('and their own people are in it', /Chenjerai/.test(r.text));
+
+  section('and a claim is recorded, because it changes what every word means');
+  const said = await pool.query(
+    `SELECT kind, detail FROM audit_events
+      WHERE tree_id = $1 AND kind = 'session.identified'
+      ORDER BY at DESC LIMIT 1`, [nyamhunga.id]);
+  eq('there is a line for it', said.rows.length, 1);
+  check('naming who they said they were', /Chenjerai/.test(said.rows[0].detail.name),
+        JSON.stringify(said.rows[0].detail));
+
+  section('a family cannot claim to be somebody in ANOTHER family');
+  const inTheOtherFamily = await pool.query(
+    'SELECT id FROM people WHERE tree_id=$1 LIMIT 1', [moyo.id]);
+  r = await one.go('/api/me/person', { method:'POST',
+    json:{ personId: inTheOtherFamily.rows[0].id } });
+  eq('refused', r.status, 400);
+  r = await one.go('/api/me');
+  eq('and they are still who they were', r.body.person.id, chenjerai.id);
+
+  section('AND THE KEEPER STILL SEES NO NAME, not even through this');
+  /* Who is viewing is a name from inside a family, which is the one thing the
+     keeper never sees. Whether a session has ANSWERED is an operational fact
+     worth knowing — somebody saying the words look wrong is usually somebody
+     who has not said who they are — and it gives away nothing. So the list
+     says that a session answered, and how, and stops. */
+  r = await keeper.go('/api/admin/sessions?limit=200');
+  eq('the sessions are listed', r.status, 200);
+  check('no name from inside a family', !/Chenjerai/.test(r.text), r.text.slice(0, 300));
+  const identified = r.body.sessions.filter(x => x.identified);
+  check('but it does say somebody has answered', identified.length >= 1,
+        JSON.stringify(r.body.sessions.map(x => x.identified)));
+  check('and how they came to be that person',
+        identified.every(x => x.person_via === 'self' || x.person_via === 'invite'),
+        JSON.stringify(identified.map(x => x.person_via)));
+  check('with no person id to correlate them by either',
+        !r.text.includes(chenjerai.id), 'a person id reached the keeper');
 
   section('A FAMILY CANNOT REACH ANOTHER FAMILY');
   for (const path of [

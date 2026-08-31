@@ -177,20 +177,24 @@ function forgetTree(treeId) {
    hashed on the way into the table, and never stored or logged in full. */
 async function createSession(pool, {
   scope, treeId = null, via = '', inviteId = null, actor = '',
-  ip = null, userAgent = '', passcodeGen = 0, days = SESSION_DAYS
+  ip = null, userAgent = '', passcodeGen = 0, days = SESSION_DAYS,
+  personId = null, personVia = 'self'
 } = {}) {
   const raw = token();
   const { rows } = await pool.query(
     `INSERT INTO sessions
        (token_hash, scope, tree_id, passcode_gen, via, invite_id, actor,
-        expires_at, created_ip, last_ip, user_agent)
+        expires_at, created_ip, last_ip, user_agent, person_id, person_set_at,
+        person_via)
      VALUES ($1, $2, $3, $4, $5, $6, $7,
              clock_timestamp() + ($8 || ' days')::interval, $9::text::inet,
-             $9::text::inet, $10)
-     RETURNING id, scope, tree_id, expires_at`,
+             $9::text::inet, $10, $11,
+             CASE WHEN $11::uuid IS NULL THEN NULL ELSE clock_timestamp() END,
+             CASE WHEN $11::uuid IS NULL THEN '' ELSE $12 END)
+     RETURNING id, scope, tree_id, expires_at, person_id, person_via`,
     [sha256(raw).toString('hex'), scope, treeId, passcodeGen, via, inviteId,
      String(actor || '').slice(0, 120), String(days), ip,
-     String(userAgent || '').slice(0, 400)]);
+     String(userAgent || '').slice(0, 400), personId, personVia]);
 
   return { ...rows[0], cookie: `${rows[0].id}.${raw}` };
 }
@@ -218,11 +222,16 @@ async function readSession(pool, cookieValue) {
   try {
     const { rows } = await pool.query(
       `SELECT s.id, s.token_hash, s.scope, s.tree_id, s.passcode_gen, s.via,
-              s.actor, s.expires_at, s.revoked_at,
+              s.actor, s.expires_at, s.revoked_at, s.person_id, s.person_set_at,
+              s.person_via, p.name AS person_name,
               t.name AS tree_name, t.handle, t.passcode_gen AS tree_gen,
               t.suspended_at
          FROM sessions s
          LEFT JOIN trees t ON t.id = s.tree_id
+         -- Left join, and the name may come back NULL: a session can point at
+         -- somebody who has since been set aside, and being set aside is not
+         -- being signed out.
+         LEFT JOIN people p ON p.id = s.person_id AND p.tree_id = s.tree_id
         WHERE s.id = $1`, [id]);
     row = rows[0];
   } catch {
@@ -242,12 +251,107 @@ async function readSession(pool, cookieValue) {
   const session = live ? {
     id: row.id, scope: row.scope, treeId: row.tree_id, via: row.via,
     actor: row.actor, treeName: row.tree_name, handle: row.handle,
-    expiresAt: row.expires_at
+    expiresAt: row.expires_at,
+    // Who this session says it is. Every term the app produces is reckoned
+    // from this person, so it travels with the session on every request
+    // rather than being asked for separately.
+    personId: row.person_id || null,
+    personName: row.person_name || '',
+    personSetAt: row.person_set_at || null,
+    // 'invite' means somebody else named them and this session cannot
+    // re-answer; 'self' means it said so itself, with a shared passcode.
+    personVia: row.person_via || ''
   } : null;
 
   cache.set(id, { until: Date.now() + CACHE_MS, session, tokenHash: row.token_hash,
                   treeId: row.tree_id });
   return session && sameToken(raw, row.token_hash) ? session : null;
+}
+
+/* SAY WHO A SESSION IS.
+
+   The one write that changes what every other answer MEANS. Nothing about the
+   tree changes; the whole of it is re-reckoned, because Amaiguru and Amainini,
+   Tete and Sekuru, and "my sister's children are my children" all turn on who
+   is asking.
+
+   The person must be in this session's own family. That check is not a
+   nicety — without it a session could name somebody in another family and the
+   app would start tracing relationships across the wall this project exists to
+   keep up.
+
+   The cache is dropped rather than updated: the next read is one query, and a
+   session holding a stale answer to "who am I" is a session being shown
+   somebody else's family in Shona. */
+async function identify(pool, sessionId, personId, { by = '' } = {}) {
+  const { rows: was } = await pool.query(
+    `SELECT s.id, s.tree_id, s.person_via, s.person_id AS before_id,
+            p.name AS before_name
+       FROM sessions s
+       LEFT JOIN people p ON p.id = s.person_id
+      WHERE s.id = $1 AND s.revoked_at IS NULL`, [sessionId]);
+  if (!was.length) return null;
+  const treeId = was[0].tree_id;
+
+  /* A session that arrived on a link made FOR somebody cannot say it is
+     somebody else. That refusal IS the attestation — without it the naming on
+     the invitation would be a suggestion, and the difference between "Bertha
+     says this is Agnes" and "this says it is Agnes" would be nothing at all.
+     Whoever holds the link and is not Agnes needs their own. */
+  if (was[0].person_via === 'invite') {
+    const e = new Error(
+      `This link was made for ${was[0].before_name || 'somebody in particular'}, ` +
+      `so it opens as them. Ask the family for a link of your own.`);
+    e.status = 409; e.code = 'attested';
+    throw e;
+  }
+
+  // Clearing it is allowed and is not the same as never having said: somebody
+  // who marked the wrong person should be able to take it back rather than
+  // being stuck as their own cousin.
+  if (personId === null) {
+    await pool.query(
+      `UPDATE sessions SET person_id = NULL, person_set_at = NULL, person_via = ''
+        WHERE id = $1`, [sessionId]);
+    cacheDrop(sessionId);
+    return { id: sessionId, personId: null, personName: '',
+             beforeId: was[0].before_id || null, beforeName: was[0].before_name || '',
+             by };
+  }
+
+  const { rows: who } = await pool.query(
+    `SELECT id, name FROM people WHERE id = $1 AND tree_id = $2`, [personId, treeId]);
+  if (!who.length) {
+    const e = new Error('That person is not in this family.');
+    e.status = 400; e.code = 'not_in_family';
+    throw e;
+  }
+
+  await pool.query(
+    `UPDATE sessions
+        SET person_id = $2, person_set_at = clock_timestamp(), person_via = 'self'
+      WHERE id = $1`, [sessionId, personId]);
+  cacheDrop(sessionId);
+  return { id: sessionId, treeId, personId: who[0].id, personName: who[0].name,
+           via: 'self',
+           beforeId: was[0].before_id || null, beforeName: was[0].before_name || '',
+           by };
+}
+
+/* When two records of the same person are merged, the sessions pointing at the
+   one that went follow the one that stayed.
+
+   Without this, merging your own duplicate signs you out of your own identity
+   — the session's person_id is SET NULL by the foreign key and the app asks
+   who you are again, in the middle of tidying up the tree. */
+async function carrySessions(pool, fromPersonId, toPersonId) {
+  if (!fromPersonId || !toPersonId || fromPersonId === toPersonId) return 0;
+  const { rows } = await pool.query(
+    `UPDATE sessions SET person_id = $2
+      WHERE person_id = $1 AND revoked_at IS NULL
+      RETURNING id`, [fromPersonId, toPersonId]);
+  for (const r of rows) cacheDrop(r.id);
+  return rows.length;
 }
 
 function sameToken(raw, storedHex) {
@@ -311,6 +415,13 @@ async function liveSessions(pool, { treeId = null, scope = null, limit = 100, st
     `SELECT s.id, s.scope, s.tree_id, s.via, s.actor, s.created_at, s.expires_at,
             s.last_seen_at, s.revoked_at, s.user_agent,
             host(s.created_ip) AS created_ip, host(s.last_ip) AS last_ip,
+            -- WHETHER they have said who is viewing, and how — never WHO.
+            -- This list is read by the keeper, and the keeper does not see
+            -- names from inside a family. That a relative has answered the
+            -- question is an operational fact; which relative they are is
+            -- theirs, and joining the people table here would quietly put
+            -- every family's names on the dashboard.
+            (s.person_id IS NOT NULL) AS identified, s.person_via, s.person_set_at,
             t.name AS tree_name, t.handle
        FROM sessions s
        LEFT JOIN trees t ON t.id = s.tree_id
@@ -391,18 +502,43 @@ async function decoyHash() {
    forwarded any number of times. A family that wants a link for the whole
    WhatsApp group can say so with uses. */
 async function createInvite(pool, treeId, {
-  by = '', note = '', days = INVITE_DAYS, uses = 1
+  by = '', note = '', days = INVITE_DAYS, uses = 1, forPersonId = null
 } = {}) {
   const raw = token();
+
+  /* AN INVITATION FOR A NAMED RELATIVE, which is the only thing in this
+     project that makes "who is viewing" more than a claim. A family passcode
+     is shared, so a session saying "I am Agnes" is Agnes's own word for it.
+     A link Bertha made FOR Agnes carries Bertha's word instead, and whoever
+     opens it is bound to Agnes without being asked and without being able to
+     answer differently.
+
+     It must be somebody in this family. A link naming a person in another
+     tree would bind a session to a stranger and start tracing relationships
+     straight through the wall between families. */
+  let forPerson = null;
+  if (forPersonId) {
+    const { rows: who } = await pool.query(
+      `SELECT id, name FROM people WHERE id = $1 AND tree_id = $2`,
+      [forPersonId, treeId]);
+    if (!who.length) {
+      const e = new Error('That person is not in this family.');
+      e.status = 400; e.code = 'not_in_family';
+      throw e;
+    }
+    forPerson = who[0];
+  }
+
   const { rows } = await pool.query(
-    `INSERT INTO invites (tree_id, token_hash, created_by, note, expires_at, max_uses)
-     VALUES ($1, $2, $3, $4, clock_timestamp() + ($5 || ' days')::interval, $6)
-     RETURNING id, tree_id, created_at, expires_at, max_uses, uses, note`,
+    `INSERT INTO invites (tree_id, token_hash, created_by, note, expires_at, max_uses,
+                          for_person_id)
+     VALUES ($1, $2, $3, $4, clock_timestamp() + ($5 || ' days')::interval, $6, $7)
+     RETURNING id, tree_id, created_at, expires_at, max_uses, uses, note, for_person_id`,
     [treeId, sha256(raw).toString('hex'), String(by || '').slice(0, 120),
      String(note || '').slice(0, 200), String(Math.max(1, Math.min(365, Number(days) || INVITE_DAYS))),
-     Math.max(1, Math.min(500, Number(uses) || 1))]);
+     Math.max(1, Math.min(500, Number(uses) || 1)), forPerson ? forPerson.id : null]);
   // The token is returned once and never again — same rule as the passcode.
-  return { ...rows[0], token: raw };
+  return { ...rows[0], forPersonName: forPerson ? forPerson.name : '', token: raw };
 }
 
 /* Take up an invitation. The whole check-and-consume is one statement so that
@@ -419,7 +555,7 @@ async function acceptInvite(pool, rawToken, { ip = null, userAgent = '', actor =
         AND revoked_at IS NULL
         AND expires_at > clock_timestamp()
         AND uses < max_uses
-      RETURNING id, tree_id`,
+      RETURNING id, tree_id, for_person_id`,
     [sha256(rawToken).toString('hex')]);
 
   if (!rows.length) return { ok: false, reason: 'not_usable' };
@@ -434,20 +570,27 @@ async function acceptInvite(pool, rawToken, { ip = null, userAgent = '', actor =
 
   const session = await createSession(pool, {
     scope: 'family', treeId: trees[0].id, via: 'invite', inviteId: rows[0].id,
-    passcodeGen: trees[0].passcode_gen, actor, ip, userAgent
+    passcodeGen: trees[0].passcode_gen, actor, ip, userAgent,
+    // Named by whoever sent the link, so this session never has to be asked
+    // and never gets to answer differently.
+    personId: rows[0].for_person_id || null, personVia: 'invite'
   });
   return { ok: true, inviteId: rows[0].id, treeId: trees[0].id,
-           treeName: trees[0].name, handle: trees[0].handle, session };
+           treeName: trees[0].name, handle: trees[0].handle,
+           personId: rows[0].for_person_id || null, session };
 }
 
 async function listInvites(pool, treeId, { limit = 50 } = {}) {
   const { rows } = await pool.query(
-    `SELECT id, created_by, created_at, expires_at, max_uses, uses, note,
-            revoked_at, revoked_by,
-            (revoked_at IS NULL AND expires_at > clock_timestamp() AND uses < max_uses)
-              AS usable
-       FROM invites WHERE tree_id = $1
-      ORDER BY created_at DESC LIMIT $2`,
+    `SELECT i.id, i.created_by, i.created_at, i.expires_at, i.max_uses, i.uses,
+            i.note, i.revoked_at, i.revoked_by, i.for_person_id,
+            p.name AS for_person_name,
+            (i.revoked_at IS NULL AND i.expires_at > clock_timestamp()
+             AND i.uses < i.max_uses) AS usable
+       FROM invites i
+       LEFT JOIN people p ON p.id = i.for_person_id
+      WHERE i.tree_id = $1
+      ORDER BY i.created_at DESC LIMIT $2`,
     [treeId, Math.max(1, Math.min(200, Number(limit) || 50))]);
   return rows;
 }
@@ -467,6 +610,7 @@ module.exports = {
   SESSION_DAYS, INVITE_DAYS,
   makePasscode, splitPasscode, hashPasscode, checkPasscode, issuePasscode,
   createSession, readSession, touch, revokeSession, revokeTreeSessions, forgetTree,
+  identify, carrySessions,
   liveSessions, purgeSessions, signIn,
   createInvite, acceptInvite, listInvites, revokeInvite,
   // exported for tests only

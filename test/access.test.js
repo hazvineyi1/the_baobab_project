@@ -233,6 +233,105 @@ const access = require('../db/access');
   for (let i = 0; i < 4; i++) results.push((await access.acceptInvite(pool, shared.token, {})).ok);
   eq('three in, the fourth refused', results, [true, true, true, false]);
 
+  /* ── WHO IS VIEWING ────────────────────────────────────────────────────
+     Every Shona term this app produces is reckoned from somebody. A session
+     that has not said who it is cannot be told anything true, and the
+     difference between a session saying so ITSELF and being NAMED by somebody
+     else is the difference between a claim and an attestation. Both exist
+     here, and this asserts that they stay distinguishable. */
+  section('a session says who is viewing, and it lives on the session');
+  const { rows: kin } = await pool.query(
+    `INSERT INTO people (tree_id, name, sex) VALUES ($1, 'Agnes Mandaba', 'f'),
+                                                   ($1, 'Bertha Dadirai', 'f')
+     RETURNING id, name`, [treeId]);
+  const agnes  = kin.find(p => /Agnes/.test(p.name));
+  const bertha = kin.find(p => /Bertha/.test(p.name));
+
+  // The family's passcode has been reset further up this file, so a session
+  // has to be opened under the CURRENT generation — an older one is over, and
+  // that is the point of the generation.
+  const gen = (await pool.query('SELECT passcode_gen FROM trees WHERE id=$1',
+                                [treeId])).rows[0].passcode_gen;
+  const plain = await access.createSession(pool, {
+    scope:'family', treeId, via:'passcode', passcodeGen: gen });
+  eq('a fresh session is nobody yet',
+     (await access.readSession(pool, plain.cookie)).personId, null);
+
+  await access.identify(pool, plain.id, agnes.id, { by:'Agnes' });
+  const said = await access.readSession(pool, plain.cookie);
+  eq('once it says so, it is carried', said.personId, agnes.id);
+  eq('with the name, so nothing has to look it up again', said.personName, 'Agnes Mandaba');
+  eq('and it is marked as their own word for it', said.personVia, 'self');
+
+  section('and can be taken back, because marking the wrong person is easy');
+  await access.identify(pool, plain.id, null, {});
+  eq('cleared', (await access.readSession(pool, plain.cookie)).personId, null);
+
+  section('a session cannot say it is somebody in ANOTHER family');
+  const { rows: nyarai } = await pool.query(
+    `INSERT INTO people (tree_id, name) VALUES ($1, 'Nyarai Moyo') RETURNING id`,
+    [otherId]);
+  let refusedCross = null;
+  try { await access.identify(pool, plain.id, nyarai[0].id, {}); }
+  catch (e) { refusedCross = e; }
+  check('refused', !!refusedCross, 'a cross-family claim was accepted');
+  eq('and says why', refusedCross.code, 'not_in_family');
+  eq('and it is still nobody', (await access.readSession(pool, plain.cookie)).personId, null);
+
+  section('AN INVITATION MADE FOR A NAMED RELATIVE OPENS AS THEM');
+  // This is the only thing here that makes who-is-viewing somebody else's
+  // word rather than the holder's own. A shared passcode cannot do it: the
+  // secret is the same for everybody who has it.
+  const forAgnes = await access.createInvite(pool, treeId,
+    { by:'Bertha', forPersonId: agnes.id, note:'for Tete Agnes' });
+  eq('the link knows who it is for', forAgnes.forPersonName, 'Agnes Mandaba');
+  const took = await access.acceptInvite(pool, forAgnes.token, {});
+  eq('let in', took.ok, true);
+  const bound = await access.readSession(pool, took.session.cookie);
+  eq('and is Agnes without ever being asked', bound.personId, agnes.id);
+  eq('by somebody else\'s word, not its own', bound.personVia, 'invite');
+
+  section('and it cannot then claim to be anybody else — that is the whole point');
+  let refusedReanswer = null;
+  try { await access.identify(pool, took.session.id, bertha.id, {}); }
+  catch (e) { refusedReanswer = e; }
+  check('refused', !!refusedReanswer, 'an attested session re-answered');
+  eq('and says why', refusedReanswer.code, 'attested');
+  check('naming who the link was for, so the answer is actionable',
+        /Agnes/.test(refusedReanswer.message), refusedReanswer.message);
+  eq('still Agnes', (await access.readSession(pool, took.session.cookie)).personId,
+     agnes.id);
+
+  section('an invitation cannot name somebody in another family either');
+  let refusedInvite = null;
+  try { await access.createInvite(pool, treeId, { by:'x', forPersonId: nyarai[0].id }); }
+  catch (e) { refusedInvite = e; }
+  check('refused', !!refusedInvite, 'a link named a stranger');
+  eq('and says why', refusedInvite.code, 'not_in_family');
+
+  section('setting somebody aside does not sign their session out');
+  // ON DELETE SET NULL rather than CASCADE, and set-aside is not a delete at
+  // all — the record stays, so the session goes on pointing at it.
+  await pool.query(
+    `UPDATE people SET aside_at = clock_timestamp(), aside_by = 'Bertha',
+                       aside_why = 'entered twice' WHERE id = $1`, [agnes.id]);
+  access.forgetTree(treeId);
+  const stillIn = await access.readSession(pool, took.session.cookie);
+  check('still signed in', !!stillIn, 'the session ended when a person was set aside');
+  eq('and still pointing at them', stillIn.personId, agnes.id);
+  await pool.query(
+    `UPDATE people SET aside_at = NULL, aside_by = '', aside_why = ''
+      WHERE id = $1`, [agnes.id]);
+
+  section('a session viewing as a merged-away record follows the one that stayed');
+  const mine = await access.createSession(pool, {
+    scope:'family', treeId, via:'passcode', passcodeGen: gen, personId: bertha.id });
+  eq('viewing as Bertha',
+     (await access.readSession(pool, mine.cookie)).personId, bertha.id);
+  eq('one session moved', await access.carrySessions(pool, bertha.id, agnes.id), 1);
+  eq('and is now the record that was kept',
+     (await access.readSession(pool, mine.cookie)).personId, agnes.id);
+
   await pool.end();
   report();
 })();

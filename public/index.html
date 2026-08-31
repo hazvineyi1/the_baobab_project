@@ -788,6 +788,10 @@ body{
 #bar .who b{color:var(--leaf); font-weight:700;}
 #bar .who.active{background:var(--leaf); border-color:var(--leaf); color:var(--sky);}
 #bar .who.active b{color:var(--sky);}
+/* Named by whoever made the link, and not this session's to change. Shown as
+   settled rather than as broken — it is the stronger of the two states, not a
+   loss of one. */
+#bar .who.fixed{cursor:default; border-style:dashed; border-color:var(--leaf);}
 #bar .dupes{
   padding:7px 13px; border-radius:999px; cursor:pointer; white-space:nowrap;
   background:rgba(156,97,25,.14); border:1.5px solid var(--gold-soft); color:var(--gold);
@@ -3771,6 +3775,15 @@ function openFamily(){
     `<p class="covnote">Makes a link for one person. It works once, it runs out ` +
     `after a fortnight, and it does not give them the family passcode — so it ` +
     `cannot be passed on again, and you can withdraw it on its own.</p>` +
+    /* NAMING WHO THE LINK IS FOR is what makes it more than convenience.
+       Every word this tree uses is reckoned from one person, and the passcode
+       is shared, so a relative who signs in with it can only be taken at their
+       word about who they are. A link you make FOR Agnes carries YOUR word
+       instead: it opens as her and cannot be answered differently. */
+    `<p class="covnote">Say who it is for and it will open as them — the tree ` +
+    `read from where they stand, without their having to say who they are.</p>` +
+    `<input id="famFor" class="fld" placeholder="Who is it for? Search the family" autocomplete="off">` +
+    `<div class="kinlist" id="famForList"></div>` +
     `<div class="row"><button class="btn" id="famInvite">Make an invitation</button></div>` +
     `<div id="famInviteOut"></div>` +
 
@@ -3830,7 +3843,10 @@ function openFamily(){
           : 'waiting';
         return `<p class="covnote" style="display:flex;gap:8px;align-items:baseline">` +
           `<b>${esc(state)}</b>` +
-          `<span>${esc(i.note || 'no note')}${i.created_by ? ' · by ' + esc(i.created_by) : ''}</span>` +
+          `<span>${i.for_person_name
+              ? 'opens as <b>' + esc(i.for_person_name) + '</b>'
+              : esc(i.note || 'no note')}` +
+            `${i.created_by ? ' · by ' + esc(i.created_by) : ''}</span>` +
           (i.usable ? `<button class="btn ghost" data-revoke="${esc(i.id)}"
              style="margin-left:auto;padding:2px 8px;font-size:11px">Withdraw</button>` : '') +
         `</p>`;
@@ -3852,14 +3868,50 @@ function openFamily(){
   };
   loadInvites();
 
+  /* Who the link is for, picked from the family rather than typed — an
+     invitation naming somebody who is not in the tree would bind a session to
+     nobody, and the server refuses it anyway. Leaving it blank is allowed and
+     makes the plain link this always made: useful when you do not yet know
+     which of two people will actually open it. */
+  let inviteFor = null;
+  const drawFor = () => {
+    const box = $('famForList');
+    if (!box) return;
+    const q = $('famFor').value.trim().toLowerCase();
+    if (inviteFor){
+      box.innerHTML = `<p class="covnote">It will open as <b>` +
+        `${esc(state.people[inviteFor] ? state.people[inviteFor].name : '')}</b>. ` +
+        `<button type="button" class="linkbtn" id="famForNo">not them</button></p>`;
+      $('famForNo').onclick = () => { inviteFor = null; $('famFor').value = ''; drawFor(); };
+      return;
+    }
+    if (!q){ box.innerHTML = ''; return; }
+    const hits = people().filter(p => p.name.toLowerCase().includes(q)).slice(0, 6);
+    box.innerHTML = hits.length
+      ? hits.map(p => `<button type="button" data-for="${p.id}">${esc(p.name)}` +
+          `<small>${esc(positionOf(p.id))}</small></button>`).join('')
+      : `<p class="covnote">Nobody of that name is in this family yet.</p>`;
+    box.querySelectorAll('[data-for]').forEach(b => b.onclick = () => {
+      inviteFor = b.dataset.for;
+      $('famFor').value = state.people[inviteFor].name;
+      drawFor();
+    });
+  };
+  $('famFor').oninput = drawFor;
+
   $('famInvite').onclick = async () => {
-    const note = prompt('Who is this for? (only your family sees this note)') ?? '';
+    // The typed note stays what it always was: something only the family sees,
+    // to tell one invitation from another. Naming a person is the part that
+    // does something.
+    const note = inviteFor && state.people[inviteFor]
+      ? `for ${state.people[inviteFor].name}`
+      : (prompt('A note, so you can tell your invitations apart:') ?? '');
     $('famInvite').disabled = true;
     try {
       const r = await fetch('/api/invites', {
         method:'POST', headers:{ 'Content-Type':'application/json',
                                  'X-Muti-Actor': meName() },
-        body: JSON.stringify({ note })
+        body: JSON.stringify({ note, forPersonId: inviteFor })
       });
       if (!r.ok) throw new Error('answered ' + r.status);
       showInvite(await r.json());
@@ -5208,18 +5260,153 @@ function openLook(){
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
-/* Who is holding the phone. This never goes into the shared tree — each
-   relative's own device remembers who they are, so the same tree reads
-   differently, and correctly, for every one of them. */
-const ME_KEY = 'muti-baobab-me';
+/* WHO ARE YOU IN THIS FAMILY — asked once, before anything is reckoned.
 
-function setMe(id){
+   This is the first thing after signing in, and it is deliberately not
+   skippable. Not out of strictness: a tree shown to somebody the app cannot
+   place is a tree whose every word is wrong or absent, and offering "not now"
+   would be offering the broken state as a choice.
+
+   THE ROSTER COMES WITH THE REFUSAL, so this can ask without being able to
+   read the family first — id and name, and nothing else. That is what the
+   question needs; the dates and the marriages are what the answer unlocks.
+
+   Somebody genuinely not in the tree yet can put themselves in it, which is
+   the honest answer to "I am not on this list": the way to be seen by a
+   family tree is to be in it. */
+function askWhoIsViewing(roster, saying){
+  return new Promise(resolve => {
+    closeForm();
+    pending = { kind:'card', anchorId:null };
+    const el = document.createElement('div');
+    el.id = 'form';
+    el.className = 'wide';
+
+    const listOf = q => {
+      const hits = roster
+        .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()))
+        .slice(0, 8);
+      return hits.length
+        ? hits.map(p => `<button type="button" data-who="${esc(p.id)}">${esc(p.name)}</button>`).join('')
+        : `<p class="covnote">Nobody of that name is in this family yet.</p>`;
+    };
+
+    el.innerHTML =
+      `<p class="cap">Who are you in this family?</p>` +
+      `<p class="covnote">${esc(saying || 'Every word this tree uses is reckoned ' +
+        'from one person. Say which one you are and it will read the family ' +
+        'from where you stand.')}</p>` +
+      `<input class="fld" id="whoQ" placeholder="Your name" autocomplete="off">` +
+      `<div class="kinlist" id="whoList">${listOf('')}</div>` +
+      `<p class="teachlbl">Not on this list?</p>` +
+      `<div class="row"><button type="button" class="btn ghost wide" id="whoNew">` +
+        `Add me to the family</button></div>`;
+    document.body.appendChild(el);
+    placeForm(el);
+    setTimeout(() => { try { $('whoQ').focus(); } catch (e) {} }, 60);
+
+    const pick = async id => {
+      const ok = await claimViewer(id);
+      if (!ok) return;                       // the message is already on screen
+      meId = id;
+      try { localStorage.setItem(ME_KEY, id); } catch (e) {}
+      closeForm();
+      resolve(id);
+    };
+
+    const wire = () => el.querySelectorAll('[data-who]').forEach(b =>
+      b.onclick = () => pick(b.dataset.who));
+
+    $('whoQ').oninput = () => {
+      $('whoList').innerHTML = listOf($('whoQ').value.trim());
+      wire();
+    };
+    wire();
+
+    /* ADDING YOURSELF. The ops route is open to anybody through the gate,
+       which is right: joining a family tree is being put into it, and a
+       relative who has just been given the passcode should not need somebody
+       else awake to be able to say that they exist. */
+    $('whoNew').onclick = async () => {
+      const name = String(prompt('Your name, as the family would write it:') || '').trim();
+      if (!name) return;
+      try {
+        const r = await fetch(`/api/tree/${treeId}/ops`, {
+          method:'POST', headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ ops:[{ op:'addPerson', ref:'me', name, by:name }] })
+        });
+        if (!r.ok) throw new Error('the server answered ' + r.status);
+        const done = await r.json();
+        // applyOps answers with the map from the local ref to the id it minted.
+        const id = done && done.refs && done.refs.me;
+        if (!id) throw new Error('the server did not say which record was made');
+        await pick(id);
+      } catch (e) {
+        say('That could not be added — ' + e.message);
+      }
+    };
+  });
+}
+
+/* WHO IS VIEWING.
+
+   Every Shona term this app produces is reckoned from one person. Amaiguru and
+   Amainini turn on whose mother is older; Tete and Sekuru on which side of the
+   family you stand; "my sister's children are my children" on whether the
+   person asking is a woman. There is no such thing as a term without a viewer.
+
+   This used to be a line in localStorage and nothing else, which meant the
+   viewer was a per-device preference: unset on a new phone, unset by clearing
+   a browser, and answered differently on the tablet in the next room. The tree
+   would then describe itself to nobody — which is what produced "your sister
+   Evelyn Mandaba's child" shown to somebody who has no sister Evelyn.
+
+   Now it lives on the SESSION, where getting in already lives, and the storage
+   key is only a mirror of it — kept so the page can paint before /api/me
+   answers, and so the offline copy has an answer at all. The session is the
+   truth; where the two disagree, the session wins.
+
+   `viewerVia` is how the session came to be this person: 'self' means it said
+   so, having got in with a passcode the whole family shares; 'invite' means
+   whoever made the link said so, and that cannot be re-answered here. */
+const ME_KEY = 'muti-baobab-me';
+let viewerVia = 'self';
+
+function setMe(id, opts){
   meId = id;
   pickingMe = false;
   try { id ? localStorage.setItem(ME_KEY, id) : localStorage.removeItem(ME_KEY); } catch (e) {}
+  // Tell the server, unless this IS the server's answer arriving.
+  if (store === 'shared' && !(opts && opts.fromServer)) claimViewer(id);
   updateWho();
   render();
   if (id) say(`${state.people[id].name} is you. Tap anyone to see what they are to you.`);
+}
+
+/* Say who is viewing, and mean it beyond this browser.
+
+   Deliberately not awaited by setMe: the page has already re-reckoned itself
+   and the answer on screen is right either way — what this decides is whether
+   the NEXT device to sign in gets the same answer. A failure says so rather
+   than silently leaving the two disagreeing. */
+async function claimViewer(id){
+  try {
+    const r = await fetch('/api/me/person', {
+      method:'POST', headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ personId: id || null })
+    });
+    if (r.ok){
+      const body = await r.json().catch(() => ({}));
+      viewerVia = body.person ? (body.person.via || 'self') : 'self';
+      return true;
+    }
+    const body = await r.json().catch(() => ({}));
+    say(body.message || 'The server did not accept that. It is remembered on ' +
+        'this device only.');
+  } catch (e) {
+    say('That is remembered on this device, but the server could not be told.');
+  }
+  return false;
 }
 
 /* The Set aside button, which is also the notice. It stays hidden while
@@ -5261,8 +5448,16 @@ function updateWho(){
   const p = meId && state.people[meId];
   btn.classList.toggle('active', pickingMe);
   btn.innerHTML = pickingMe ? 'Tap your own name' : `You: <b>${p ? esc(p.name.split(' ')[0]) : '—'}</b>`;
-  btn.title = p ? `Terms are shown from ${p.name}'s side. Tap to change.`
-                : 'Say who you are, and every name will tell you what they are to you.';
+  /* A session named by an invitation cannot re-answer — that refusal is the
+     whole value of naming a link, and the button says so rather than letting
+     the tap be made and refused. */
+  const named = store === 'shared' && viewerVia === 'invite';
+  btn.classList.toggle('fixed', named);
+  btn.title = named
+    ? `This link was made for ${p ? p.name : 'somebody in particular'}, so the ` +
+      `tree is read from where they stand. Ask the family for a link of your own.`
+    : p ? `Terms are shown from ${p.name}'s side. Tap to change.`
+        : 'Say who you are, and every name will tell you what they are to you.';
 }
 
 /* ── interaction ────────────────────────────────────────────────────── */
@@ -5444,6 +5639,12 @@ function fit(){
 }
 
 $('who').onclick = () => {
+  if (store === 'shared' && viewerVia === 'invite'){
+    say(`This link was made for ${meId && state.people[meId]
+          ? state.people[meId].name : 'somebody in particular'}, so it reads the ` +
+        `family from where they stand. Ask the family for a link of your own.`);
+    return;
+  }
   if (meId){ setMe(null); return; }
   pickingMe = !pickingMe;
   updateWho();
@@ -5628,7 +5829,19 @@ async function load(){
       familyKey = home.key || asked || null;
       familyName = home.name || '';
       if (familyKey) rememberFamily(familyKey);
-      await pull();
+      /* THE TREE IS NOT HANDED OVER UNTIL THIS PAGE SAYS WHO IS LOOKING.
+         Answering is a tap; until it is answered there is nothing worth
+         painting, since every word would be reckoned from nobody. */
+      try {
+        await pull();
+      } catch (e) {
+        if (!e.whoAreYou) throw e;
+        // `store` stays as it is until the tree is actually in hand: it is
+        // what the rest of the page reads to know whether there is anything
+        // to show, and a page holding a question is not a page holding a tree.
+        await askWhoIsViewing(e.whoAreYou, e.saying);
+        await pull();
+      }
       store = 'shared';
     } catch (e) {
       store = 'stalled';
@@ -5662,10 +5875,15 @@ async function load(){
   if (!state || !state.people) state = { people:{}, unions:{}, rootId:null, seq:1 };
   if (!state.notDuplicates) state.notDuplicates = [];
   if (!state.lexicon) state.lexicon = {};
+  /* The stored answer paints first, and the SESSION overrules it. On one
+     device they agree and nothing happens; on a new one the session is the
+     only one that knows, and on a device that was somebody else's the stored
+     answer is the wrong one and must not survive. */
   try {
     const saved = localStorage.getItem(ME_KEY);
     if (saved && state.people[saved]) meId = saved;
   } catch (e) {}
+  if (store === 'shared') await adoptViewer();
   showStalled();
   updateWho();
   render();
@@ -5677,8 +5895,42 @@ async function load(){
 // partial tree gives quietly wrong kinship terms rather than missing ones.
 async function pull(){
   const r = await fetch(`/api/tree/${treeId}/tree`, { headers:{ Accept:'application/json' } });
+  /* 428 is the server saying it will not describe a family to somebody who
+     has not said who they are — see routes/tree.js. It is not a failure and
+     must not be shown as one: it carries the roster to answer with, and the
+     answer is one tap. */
+  if (r.status === 428){
+    const body = await r.json().catch(() => ({}));
+    const e = new Error('who_are_you');
+    e.whoAreYou = Array.isArray(body.people) ? body.people : [];
+    e.saying = body.message || '';
+    throw e;
+  }
   if (!r.ok) throw new Error('the server answered ' + r.status);
   adopt(await r.json());
+}
+
+/* Take the session's answer to "who is viewing" as this page's own.
+
+   The server is asked rather than told, because it is the one that knows: a
+   session bound by an invitation was named by whoever sent it and has never
+   been asked, and a session on a second device already answered on the
+   first. */
+async function adoptViewer(){
+  try {
+    const r = await fetch('/api/me', { headers:{ Accept:'application/json' } });
+    if (!r.ok) return;
+    const me = await r.json();
+    viewerVia = me.person ? (me.person.via || 'self') : 'self';
+    if (me.person && state.people[me.person.id]){
+      setMe(me.person.id, { fromServer:true });
+    } else if (!me.person && meId){
+      // This device remembers somebody the session has not been told about —
+      // usually the first sign-in after this was added. Say it once rather
+      // than letting the two go on disagreeing.
+      claimViewer(meId);
+    }
+  } catch (e) { /* the tree still reads; only the viewer is unconfirmed */ }
 }
 
 function adopt(tree){
