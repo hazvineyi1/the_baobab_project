@@ -39,6 +39,7 @@ const KINDS = Object.freeze([
   'family.created',
   'family.suspended',
   'family.restored',
+  'family.deleted',     // the one destructive act, and the line outlives the family
   'family.key_rotated',
   'appeal.raised',
   'appeal.answered',

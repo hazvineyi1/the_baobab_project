@@ -191,6 +191,84 @@ async function restore(pool, treeId, { by = '' } = {}) {
   return rows[0] || null;
 }
 
+/* REMOVE A FAMILY ENTIRELY. The one destructive act in this project.
+
+   Everything else here is reversible on purpose. Nothing in a tree is ever
+   deleted — a person is set aside, with a reason and a note of who did it, and
+   can be brought back. A family can be closed and reopened. That is the whole
+   promise, and this is the single exception to it, granted to the keeper and
+   to nobody else.
+
+   WHY THE KEEPER AND NOT THE FAMILY. A family that could delete itself would
+   be one relative able to end everybody else's work in one action, which is
+   exactly what set-aside exists to prevent. A keeper deleting a family is a
+   different act with a different reason behind it: a tree of spam, a test
+   somebody left, a family that has asked to be gone.
+
+   THREE THINGS GUARD IT.
+
+   The family must already be CLOSED. Deletion is the second half of a
+   deliberate act, never the first — closing it takes nothing away and gives
+   whoever is affected somewhere to appeal from.
+
+   The handle must be typed back, so that deleting the wrong family takes more
+   than a mis-click on the wrong row.
+
+   And the RECORD OUTLIVES THE FAMILY. audit_events has no foreign key to
+   trees, deliberately, and the line is written before the delete rather than
+   after — what happened to a family has to survive the family or it is not a
+   record. Appeals survive too: their reference is SET NULL and they keep the
+   name as text, because an appeal about a family that has since gone is
+   exactly the one you would most want to still be able to read.
+
+   WHAT IS NOT RETURNED: anything from inside the tree. Not one name. An admin
+   who could read a family's records by deleting them would be an admin who
+   can read a family's records, and the wall this project draws would be a
+   formality. Counts only.
+
+   IT CANNOT BE UNDONE from inside the app. The database's own backups are the
+   only way back, and that is stated where the button is. */
+async function remove(pool, treeId, { by = '', reason = '' } = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT id, name, handle, suspended_at FROM trees WHERE id = $1 FOR UPDATE`, [treeId]);
+    if (!rows.length){ await client.query('ROLLBACK'); return null; }
+    if (!rows[0].suspended_at){
+      await client.query('ROLLBACK');
+      const e = new Error('Close this family first. Deleting one is the second ' +
+                          'half of a deliberate act, never the first.');
+      e.status = 409; e.code = 'not_closed';
+      throw e;
+    }
+
+    const { rows: counts } = await client.query(
+      `SELECT (SELECT count(*)::int FROM people  WHERE tree_id = $1) AS people,
+              (SELECT count(*)::int FROM unions  WHERE tree_id = $1) AS unions,
+              (SELECT count(*)::int FROM changes WHERE tree_id = $1) AS changes`,
+      [treeId]);
+
+    /* union_children.union_id is RESTRICT, and that is not an obstacle to work
+       around — it is the rule that stops a marriage being deleted out from
+       under the children whose only record of their parents it is. Clearing it
+       first is the deliberate act it was put there to require, and it happens
+       inside this transaction so a failure anywhere leaves the family whole. */
+    await client.query(
+      `DELETE FROM union_children
+        WHERE union_id IN (SELECT id FROM unions WHERE tree_id = $1)`, [treeId]);
+    await client.query('DELETE FROM trees WHERE id = $1', [treeId]);
+    await client.query('COMMIT');
+    return { id: rows[0].id, name: rows[0].name, handle: rows[0].handle,
+             ...counts[0], by, reason };
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 /* How much of the database each part is actually using, largest first. The
    answer to "is this deployment about to become expensive", and the one place
    the partitioned audit table shows its shape. */
@@ -237,5 +315,5 @@ async function activity(pool, { days = 14 } = {}) {
   return rows;
 }
 
-module.exports = { overview, families, family, suspend, restore, storage, activity,
-                   countOf, estimate };
+module.exports = { overview, families, family, suspend, restore, remove,
+                   storage, activity, countOf, estimate };

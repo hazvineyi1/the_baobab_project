@@ -494,10 +494,20 @@ async function openFamily(id) {
         ? `<button class="act" data-act="restore" data-id="${esc(f.id)}">Reopen this family</button>`
         : `<button class="act danger" data-act="suspend" data-id="${esc(f.id)}">Close this family</button>`}
       <button class="act danger" data-act="revoke-sessions" data-id="${esc(f.id)}">Sign everyone out</button>
+      ${f.suspended_at
+        ? `<button class="act danger" data-act="delete" data-id="${esc(f.id)}"
+             data-handle="${esc(f.handle)}" data-people="${f.people}">Delete this family</button>`
+        : ''}
     </div>
     <p class="say">Issuing a passcode ends every session this family has open, and
        the new one can be shown only once. Nobody can read the old one back — not
        even from the database.</p>
+    ${f.suspended_at ? `<p class="say"><b>Deleting is the one thing here that cannot
+       be undone.</b> Everything else in this project is reversible — a person is
+       set aside rather than removed, a family is closed rather than ended. This
+       is not. The record of what happened stays in Activity and any appeals are
+       kept; the tree itself is gone, and only a database backup brings it
+       back.</p>` : ''}
 
     <h3 style="font-size:13px;margin-top:20px">Their last few events</h3>
     <div class="scroll"><table><thead><tr>
@@ -527,6 +537,22 @@ $('famDetail').addEventListener('click', async e => {
       await post(`/api/admin/family/${id}/suspend`, { reason });
     } else if (b.dataset.act === 'restore') {
       await post(`/api/admin/family/${id}/restore`);
+    } else if (b.dataset.act === 'delete') {
+      const people = Number(b.dataset.people || 0);
+      const reason = prompt(
+        `Delete ${b.dataset.handle} and everything in it — ${people} ` +
+        `${people === 1 ? 'person' : 'people'}?\n\n` +
+        `This cannot be undone from inside this app.\n\n` +
+        `Why is it being deleted? (kept in the record)`);
+      if (reason === null) return;
+      const typed = prompt(`Type the family's handle to confirm: ${b.dataset.handle}`);
+      if (typed === null) return;
+      const d = await post(`/api/admin/family/${id}/delete`,
+                           { handle: typed, reason });
+      alert(`${d.name} deleted — ${d.people} people, ${d.changes} recorded edits.\n\n${d.notice}`);
+      $('famDetail').innerHTML = '';
+      await loadFamilies(false);
+      return;
     } else if (b.dataset.act === 'revoke-sessions') {
       if (!confirm('Sign everybody in this family out? Their passcode still works.')) return;
       const d = await post(`/api/admin/family/${id}/revoke-sessions`);

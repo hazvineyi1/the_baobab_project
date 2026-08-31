@@ -377,6 +377,86 @@ function client(server) {
     [nyamhunga.id]);
   eq('and takes nothing with it', stillThere.rows[0].n, 1);
 
+  // ── deleting a family ────────────────────────────────────────────────────
+  section('DELETING A FAMILY — the one destructive act, and what guards it');
+  const doomed = await mk('a family to remove');
+  await pool.query(`INSERT INTO people (tree_id, name, totem) VALUES ($1,'Somebody','Nzou')`,
+    [doomed.id]);
+  // Give it a marriage with a child in it, so the delete has to get past the
+  // RESTRICT on union_children rather than only cascading.
+  const u = (await pool.query(`INSERT INTO unions (tree_id) VALUES ($1) RETURNING id`,
+    [doomed.id])).rows[0].id;
+  const kid = (await pool.query(
+    `INSERT INTO people (tree_id, name, totem) VALUES ($1,'A child','Nzou') RETURNING id`,
+    [doomed.id])).rows[0].id;
+  await pool.query(
+    `INSERT INTO union_children (union_id, person_id, birth_order) VALUES ($1,$2,0)`,
+    [u, kid]);
+
+  r = await keeper.go(`/api/admin/family/${doomed.id}/delete`,
+    { method:'POST', json:{ handle: doomed.handle } });
+  eq('an OPEN family cannot be deleted', r.status, 409);
+  check('and it says to close it first', /Close this family first/.test(r.body.message));
+
+  await keeper.go(`/api/admin/family/${doomed.id}/suspend`,
+    { method:'POST', json:{ reason:'spam' } });
+
+  r = await keeper.go(`/api/admin/family/${doomed.id}/delete`,
+    { method:'POST', json:{ handle:'not-the-handle' } });
+  eq('a closed family still needs its handle typed back', r.status, 400);
+  check('and says nothing was deleted', /Nothing has been deleted/.test(r.body.message));
+  const survived = await pool.query('SELECT count(*)::int n FROM trees WHERE id=$1',
+    [doomed.id]);
+  eq('which is true', survived.rows[0].n, 1);
+
+  section('with the handle typed, it goes');
+  r = await keeper.go(`/api/admin/family/${doomed.id}/delete`,
+    { method:'POST', json:{ handle: doomed.handle, reason:'a tree of spam' } });
+  eq('deleted', r.status, 200);
+  eq('and says how much went with it', r.body.people, 2);
+  const after2 = await pool.query('SELECT count(*)::int n FROM trees WHERE id=$1', [doomed.id]);
+  eq('the family is gone', after2.rows[0].n, 0);
+  const orphans = await pool.query('SELECT count(*)::int n FROM people WHERE tree_id=$1',
+    [doomed.id]);
+  eq('and nobody is left behind', orphans.rows[0].n, 0);
+
+  section('but NOT one name of theirs came back in the answer');
+  // An admin who could read a family's records by deleting them would be an
+  // admin who can read a family's records.
+  check('no names', !/Somebody|A child/.test(r.text), r.text);
+
+  section('and the record outlives the family');
+  r = await keeper.go('/api/admin/events?kind=family.deleted&limit=10');
+  const line = r.body.events.find(e => e.tree_id === doomed.id);
+  check('the deletion is recorded', !!line);
+  eq('with the name it had', line.detail.name, 'a family to remove');
+  eq('how many people were in it', line.detail.people, 2);
+  eq('and why', line.detail.reason, 'a tree of spam');
+
+  section('an appeal that family raised is kept, and still says who it was about');
+  const doomed2 = await mk('another to remove');
+  await pool.query(
+    `INSERT INTO appeals (tree_id, tree_label, kind, body) VALUES ($1,$2,'access','let us in')`,
+    [doomed2.id, 'doomed-label']);
+  await keeper.go(`/api/admin/family/${doomed2.id}/suspend`, { method:'POST', json:{} });
+  await keeper.go(`/api/admin/family/${doomed2.id}/delete`,
+    { method:'POST', json:{ handle: doomed2.handle } });
+  const appealAfter = await pool.query(
+    `SELECT tree_id, tree_label FROM appeals WHERE tree_label = 'doomed-label'`);
+  eq('the appeal is still there', appealAfter.rows.length, 1);
+  eq('its link to the family is cleared', appealAfter.rows[0].tree_id, null);
+  eq('but it still says which family it was', appealAfter.rows[0].tree_label, 'doomed-label');
+
+  section('a family cannot delete itself');
+  const victim = client(server);
+  r = await keeper.go(`/api/admin/family/${moyo.id}/passcode`, { method:'POST' });
+  await victim.go('/gate', { method:'POST', form:{ passphrase: r.body.passcode } });
+  r = await victim.go(`/api/admin/family/${moyo.id}/delete`,
+    { method:'POST', json:{ handle: moyo.handle } });
+  eq('refused', r.status, 403);
+  const still = await pool.query('SELECT count(*)::int n FROM trees WHERE id=$1', [moyo.id]);
+  eq('and they are still there', still.rows[0].n, 1);
+
   section('the numbers the dashboard opens with');
   r = await keeper.go('/api/admin/overview');
   check('families are counted', r.body.families.n >= 3);

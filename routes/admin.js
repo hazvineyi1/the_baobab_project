@@ -168,6 +168,58 @@ module.exports = function adminRoutes(pool) {
     } catch (e) { fail(res, e); }
   });
 
+  /* Delete a family. See db/admin.js for the three things that guard it.
+
+     The record is written BEFORE the delete, not after: audit_events has no
+     foreign key to trees precisely so that what happened to a family outlives
+     the family, and a line written afterwards is a line that might not be
+     written at all. */
+  r.post('/api/admin/family/:id/delete', async (req, res) => {
+    try {
+      const by = whoami(req);
+      const reason = String(req.body?.reason || '').slice(0, 500);
+      const found = await adminDb.family(pool, req.params.id);
+      if (!found) return res.status(404).json({ error: 'no_such_family' });
+
+      // Typed back by hand, so deleting the wrong family takes more than a
+      // mis-click on the wrong row.
+      const typed = String(req.body?.handle || '').trim().toLowerCase();
+      if (typed !== found.handle) {
+        return res.status(400).json({
+          error: 'handle_mismatch',
+          message: `Type ${found.handle} to confirm. Nothing has been deleted.`
+        });
+      }
+
+      /* The same precondition remove() enforces, checked here so the line
+         below is not written for a delete that was never going to happen.
+         remove() re-checks it under FOR UPDATE, which is what actually holds
+         against a race; this only keeps the record honest. */
+      if (!found.suspended_at) {
+        return res.status(409).json({
+          error: 'not_closed',
+          message: 'Close this family first. Deleting one is the second half ' +
+                   'of a deliberate act, never the first.'
+        });
+      }
+
+      await audit.record(pool, {
+        ...ctx(req), kind: 'family.deleted', ok: true, treeId: req.params.id,
+        detail: { name: found.name, handle: found.handle, people: found.people,
+                  changes: found.changes, reason }
+      });
+
+      const gone = await adminDb.remove(pool, req.params.id, { by, reason });
+      if (!gone) return res.status(404).json({ error: 'no_such_family' });
+      access.forgetTree(req.params.id);
+
+      res.json({ ...gone,
+        notice: 'Deleted. The record of what happened to this family remains in ' +
+                'Activity, and any appeals it raised are kept. Nothing else is ' +
+                'recoverable from inside this app.' });
+    } catch (e) { fail(res, e); }
+  });
+
   r.post('/api/admin/family/:id/revoke-sessions', async (req, res) => {
     try {
       const by = whoami(req);
