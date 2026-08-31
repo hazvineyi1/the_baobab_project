@@ -204,6 +204,13 @@
       </select>
       <button class="act" id="famSearch">Search</button>
     </div>
+    <!-- The other half of signing up. A family that telephoned, or that wrote
+         in through an appeal, or one somebody is setting up for an elder. -->
+    <div class="row">
+      <input class="grow" id="famNew" placeholder="Start a family for somebody — whose family is it?"
+             autocomplete="off" maxlength="200">
+      <button class="act" id="famStart">Start it</button>
+    </div>
     <div class="scroll"><table id="famTable"><thead><tr>
       <th>Family</th><th>Handle</th><th class="num">People</th>
       <th class="num">Here now</th><th>Last edit</th><th>Passcode</th><th></th>
@@ -665,6 +672,24 @@ async function loadSessions() {
     body.appendChild(tr);
   }
 }
+/* Starting a family for somebody who asked.
+
+   The passcode comes back once and is shown in the same modal a reset uses —
+   deliberately the same, because it is the same act with the same one
+   consequence: written down now or asked for again. */
+$('famStart').onclick = async () => {
+  const name = $('famNew').value.trim();
+  if (!name) { $('famNew').focus(); return; }
+  $('famStart').disabled = true;
+  try {
+    const d = await post('/api/admin/families', { name });
+    $('famNew').value = '';
+    reveal(d);
+    await loadFamilies(false);
+  } catch (err) { showErr(err); }
+  $('famStart').disabled = false;
+};
+
 loaders.sessions = () => loadSessions().catch(showErr);
 $('sesGo').onclick = () => loadSessions().catch(showErr);
 $('sesStale').onchange = () => loadSessions().catch(showErr);

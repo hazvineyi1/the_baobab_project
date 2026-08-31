@@ -75,6 +75,64 @@ const section = t => console.log('\n' + t);
   await saved(first.page);
   is((await first.page.evaluate(() => people().length)), 5, 'five people recorded');
 
+  // ── signing up ───────────────────────────────────────────────────────────
+  section('A FAMILY WITH NOTHING STARTS ITS OWN TREE FROM THE DOOR');
+  /* The answer to "how does a family sign up", and until this existed there
+     was none: the door took a passcode, a passcode came from a family that
+     already existed, and everybody was somebody else's guest. */
+  const newCtx = await browser.newContext({ viewport:{ width:1180, height:900 } });
+  await newCtx.route('**', r => r.request().url().startsWith(BASE) ? r.continue() : r.abort());
+  const fresh2 = await newCtx.newPage();
+  await fresh2.goto(BASE, { waitUntil:'domcontentloaded' });
+  const offer = await fresh2.$('a[href="/start"]');
+  is(!!offer, true, 'the door offers a way to start one');
+  await Promise.all([
+    fresh2.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    offer.click()
+  ]);
+  const NEWFAM = 'the Signup' + Date.now().toString(36).slice(-5) + ' family';
+  await fresh2.fill('input[name="name"]', NEWFAM);
+  await Promise.all([
+    fresh2.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    fresh2.click('button[type="submit"]')
+  ]);
+
+  section('and the passcode is shown once, before anything else happens');
+  const code = await fresh2.$eval('.code', el => el.textContent.trim()).catch(() => '');
+  is(/^[a-z0-9]+-/.test(code), true, 'it is a passcode: ' + code.slice(0, 12) + '…');
+  is(/not be shown again/.test(await fresh2.textContent('body')), true,
+     'and it says so plainly');
+
+  section('they are already inside, so the tree is theirs from the first tap');
+  await Promise.all([
+    fresh2.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    fresh2.click('button[type="submit"]')
+  ]);
+  await fresh2.waitForFunction(() => { try { return typeof store === 'string'; }
+                                       catch (e) { return false; } }, null, { timeout: 15000 });
+  is(await fresh2.evaluate(() => familyName), NEWFAM,
+     'in their own family, named as they named it');
+  is(await fresh2.evaluate(() => people().length), 0, 'with nobody in it yet');
+  is(await fresh2.$('#whoQ'), null,
+     'and not asked who they are — there is nobody to be yet');
+
+  section('and the passcode they were shown really is the way back');
+  const again = await browser.newContext({ viewport:{ width:1180, height:900 } });
+  await again.route('**', r => r.request().url().startsWith(BASE) ? r.continue() : r.abort());
+  const returning = await again.newPage();
+  await returning.goto(BASE, { waitUntil:'domcontentloaded' });
+  await returning.fill('input[name="passphrase"]', code);
+  await Promise.all([
+    returning.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    returning.click('button[type="submit"]')
+  ]);
+  await returning.waitForFunction(() => { try { return typeof store === 'string'; }
+                                          catch (e) { return false; } },
+                                  null, { timeout: 15000 });
+  is(await returning.evaluate(() => familyName), NEWFAM, 'the same family opens');
+  await again.close();
+  await newCtx.close();
+
   // ── the question ─────────────────────────────────────────────────────────
   section('A SECOND RELATIVE SIGNS IN WITH THE SAME PASSCODE AND IS ASKED');
   const ctx = await browser.newContext({ viewport:{ width:1180, height:900 } });

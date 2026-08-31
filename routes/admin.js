@@ -112,6 +112,49 @@ module.exports = function adminRoutes(pool) {
      Every session the family had ends at the same moment, which is the point
      when the reason for the reset is that the old one went somewhere it should
      not have. */
+  /* THE KEEPER STARTS A FAMILY, for one that asked.
+
+     The other half of signing up. A family that telephoned, or that wrote in
+     through /appeal because open sign-up is off, or one an elder is setting up
+     on somebody else's behalf — the keeper makes the tree and hands over the
+     passcode.
+
+     IT DOES NOT MOVE THE KEEPER INTO IT. That is the whole difference from the
+     family-side /trees, which moves the caller's session into the tree it just
+     made. Doing that here would take the keeper out of the admin scope and put
+     them inside a family's records — which is the one thing the wall between
+     them exists to prevent. The keeper makes the door and does not walk
+     through it. */
+  r.post('/api/admin/families', async (req, res) => {
+    try {
+      const by = whoami(req);
+      const name = String(req.body?.name || '').trim().slice(0, 200);
+      if (!name) return res.status(400).json({
+        error: 'no_name', message: 'Give the family a name.' });
+
+      const { rows } = await pool.query(
+        `INSERT INTO trees (name, created_by) VALUES ($1, $2)
+         RETURNING id, name, handle, created_at`, [name, by || 'the keeper']);
+      const made = rows[0];
+      const issued = await access.issuePasscode(pool, made.id, { by });
+
+      await audit.record(pool, { ...ctx(req), kind: 'family.created', ok: true,
+        treeId: made.id, detail: { name: made.name, handle: made.handle,
+                                   from: 'keeper' } });
+      await audit.record(pool, { ...ctx(req), kind: 'passcode.set', ok: true,
+        treeId: made.id, detail: { generation: issued.passcode_gen,
+                                   from: 'keeper' } });
+
+      res.status(201).json({
+        id: made.id, name: made.name, handle: made.handle,
+        passcode: issued.passcode,
+        notice: 'Give this to the family now. It is the only time it can be ' +
+                'seen — it is stored as a hash, so nobody can read it back, ' +
+                'you included. If it is lost, issue another.'
+      });
+    } catch (e) { fail(res, e); }
+  });
+
   r.post('/api/admin/family/:id/passcode', async (req, res) => {
     try {
       const by = whoami(req);

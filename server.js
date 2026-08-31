@@ -91,6 +91,17 @@ app.use(gate({
   // The keeper of this deployment. Opens the admin pages and NO family's tree.
   adminPassphrase: process.env.MW_ADMIN_PASSPHRASE,
   hasDatabase: !!DATABASE_URL,
+  /* WHETHER A FAMILY CAN START ITS OWN TREE from the door.
+
+     On, because the alternative is that every family has to find the keeper
+     and wait — which makes the keeper the bottleneck on the one act that
+     should need nobody's permission, a household writing down its own
+     people. It is rate limited hard, it creates a tree that nobody else can
+     see or list, and the keeper can close any of them.
+
+     MW_OPEN_SIGNUP=off makes the keeper the only issuer. The appeal at
+     /appeal is then the way a family asks. */
+  openSignup: !/^(off|0|false|no)$/i.test(String(process.env.MW_OPEN_SIGNUP || '').trim()),
   getPool: () => pool,
   getHomeTreeId: () => homeTreeId
 }));

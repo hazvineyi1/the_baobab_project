@@ -218,5 +218,46 @@ const cookieFrom = res => {
   check('nor does a failed attempt', !wrong.text.includes(PASS));
   leaky.close();
 
+  /* ── STARTING A FAMILY FROM THE DOOR ──────────────────────────────────────
+     The answer to "how does a family sign up", which until now was that they
+     could not: the door took a passcode, and a passcode came from a family
+     that already existed, so everybody was somebody else's guest.
+
+     It is the second thing a stranger can reach that WRITES, so what is
+     asserted here is mostly what it refuses. */
+  section('a family can start its own tree, and the door says so');
+  const open = await listen(appWith({
+    passphrase: PASS, hasDatabase: true, openSignup: true }));
+  const door = await req(open, { path: '/gate' });
+  check('the door offers it', /Start your family/.test(door.text), door.text.slice(0, 400));
+  const form = await req(open, { path: '/start' });
+  eq('and the form is reachable without a passcode', form.status, 200);
+  check('it says the passcode is shown once',
+        /shown once|only way back/i.test(form.text), form.text.slice(0, 300));
+  check('and nothing about any family that already exists',
+        !form.text.includes(PASS), 'the passphrase leaked into the signup page');
+  open.close();
+
+  section('and it is off when the keeper wants to be the only issuer');
+  const shut = await listen(appWith({
+    passphrase: PASS, hasDatabase: true, openSignup: false }));
+  const shutDoor = await req(shut, { path: '/gate' });
+  check('the door does not offer it', !/Start your family/.test(shutDoor.text));
+  check('and points at the keeper instead',
+        /need one for your family/.test(shutDoor.text), shutDoor.text.slice(0, 400));
+  const gone = await req(shut, { path: '/start' });
+  check('the path is not there at all', gone.status === 401 || gone.status === 404,
+        `got ${gone.status}`);
+  shut.close();
+
+  section('starting a family needs a database, whatever the switch says');
+  // Without one there is nowhere to put a tree, and an open door to a page
+  // that cannot work is worse than a closed one.
+  const nodb = await listen(appWith({
+    passphrase: PASS, hasDatabase: false, openSignup: true }));
+  const noStart = await req(nodb, { path: '/start' });
+  check('refused', noStart.status !== 200, `got ${noStart.status}`);
+  nodb.close();
+
   report();
 })();

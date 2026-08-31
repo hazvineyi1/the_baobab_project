@@ -221,6 +221,42 @@ function client(server) {
   r = await one.go('/api/me');
   eq('and they are still who they were', r.body.person.id, chenjerai.id);
 
+  section('THE KEEPER CAN START A FAMILY FOR SOMEBODY WHO ASKED');
+  /* The other half of signing up: a family that telephoned, or wrote in
+     through an appeal, or one an elder is setting up on their behalf. */
+  r = await keeper.go('/api/admin/families', { method:'POST',
+    json:{ name:'the Chekera family' } });
+  eq('started', r.status, 201);
+  eq('with the name they gave', r.body.name, 'the Chekera family');
+  check('and a passcode, once', typeof r.body.passcode === 'string' && r.body.passcode.length > 10);
+  check('which says it will not be shown again', /only time/.test(r.body.notice || ''),
+        r.body.notice);
+  const started = r.body;
+
+  section('but it does NOT put the keeper inside the family they just made');
+  /* The whole difference from the family-side /trees, which moves the caller's
+     session into the tree it made. Doing that here would take the keeper out
+     of admin scope and put them inside a family's records — the one thing the
+     wall between them exists to prevent. The keeper makes the door and does
+     not walk through it. */
+  r = await keeper.go('/api/me');
+  eq('still the keeper', r.body.scope, 'admin');
+  eq('and in no family', r.body.treeId, null);
+  r = await keeper.go(`/api/tree/${started.id}/tree`);
+  check('and cannot read the tree they just made',
+        r.status === 404 || r.status === 403, `got ${r.status}`);
+
+  section('and the family it made really opens with that passcode');
+  const chekera = client(server);
+  r = await chekera.go('/gate', { method:'POST', form:{ passphrase: started.passcode } });
+  eq('let in', r.status, 303);
+  r = await chekera.go('/api/home');
+  eq('into their own family and no other', r.body.treeId, started.id);
+
+  section('a family with no name is refused rather than called something');
+  r = await keeper.go('/api/admin/families', { method:'POST', json:{ name:'   ' } });
+  eq('refused', r.status, 400);
+
   section('AND THE KEEPER STILL SEES NO NAME, not even through this');
   /* Who is viewing is a name from inside a family, which is the one thing the
      keeper never sees. Whether a session has ANSWERED is an operational fact

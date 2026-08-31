@@ -232,7 +232,13 @@ const SHELL_CSS = `
        color:var(--gold);font-size:12.5px}
   .note{margin-top:16px;font-size:12px;color:var(--muted)}
   .note a{color:var(--gold)}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}`;
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+  /* The passcode, the one time it exists anywhere. Big enough to copy off a
+     screen by eye and read down a phone line, which is how it will travel. */
+  .code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:19px;
+        letter-spacing:.06em;color:var(--ink);background:var(--sky);
+        border:1.5px dashed var(--gold);border-radius:12px;padding:14px;
+        text-align:center;word-break:break-all;margin:0 0 18px}`;
 
 function shell(title, body, origin) {
   return `<!doctype html><html lang="en"><head>
@@ -241,7 +247,8 @@ function shell(title, body, origin) {
 <style>${SHELL_CSS}</style></head><body>${body}</body></html>`;
 }
 
-function page({ message = '', status = 200, notice = '', origin = '' } = {}) {
+function page({ message = '', status = 200, notice = '', origin = '',
+                openSignup = false } = {}) {
   return { status, html: shell('The Muwuyu Project', `
 <form class="card" method="POST" action="/gate" autocomplete="on">
   <h1>The <em>Muwuyu</em> Project</h1>
@@ -253,9 +260,59 @@ function page({ message = '', status = 200, notice = '', origin = '' } = {}) {
   <button type="submit">Enter</button>
   ${message ? `<p class="msg">${esc(message)}</p>` : ''}
   ${notice ? `<p class="note">${esc(notice)}</p>` : ''}
-  <p class="note">Lost your passcode, or need one for your family?
+  ${openSignup ? `<p class="note">No family here yet?
+     <a href="/start">Start your family's tree.</a></p>` : ''}
+  <p class="note">Lost your passcode${openSignup ? '' : ', or need one for your family'}?
      <a href="/appeal">Ask the keeper of this deployment.</a></p>
 </form>`, origin) };
+}
+
+/* STARTING A FAMILY, from outside.
+
+   The question this answers is "how does a family sign up", and until now the
+   honest answer was that they could not: the door took a passcode, and a
+   passcode came from a family that already existed. Everybody was somebody
+   else's guest.
+
+   It writes — a tree, a passcode, a session — which makes it the second thing
+   a stranger can reach, and it is held to a tighter limit than the door for
+   that reason. A deployment that would rather issue every family itself sets
+   MW_OPEN_SIGNUP=off and this disappears, leaving the appeal as the way in. */
+function startPage({ message = '', origin = '' } = {}) {
+  return shell('Start a family — The Muwuyu Project', `
+<form class="card" method="POST" action="/start">
+  <h1>Start your family's tree</h1>
+  <p>You will be given a passcode. It is the only way back into this family,
+     it is shown once, and nobody — not even the keeper of this site — can
+     read it back to you afterwards.</p>
+  <label for="n">Whose family is this?</label>
+  <input id="n" name="name" type="text" autocomplete="off"
+         placeholder="the Musoni family" autofocus required maxlength="200">
+  <button type="submit">Start it</button>
+  ${message ? `<p class="msg">${esc(message)}</p>` : ''}
+  <p class="note">Already have a passcode? <a href="/gate">Go to the door.</a></p>
+</form>`, origin);
+}
+
+/* The passcode, once.
+
+   Not a redirect into the tree with a toast that scrolls away. It is stored as
+   a scrypt hash, so this is the only moment it exists anywhere — and a family
+   that walks past it has to ask the keeper for another. */
+function startedPage({ name, passcode, origin = '' } = {}) {
+  return shell('Your passcode — The Muwuyu Project', `
+<div class="card">
+  <h1>${esc(name)}</h1>
+  <p>Write this down now, before you go on.</p>
+  <p class="code">${esc(passcode)}</p>
+  <p class="note">It will not be shown again. It is not stored anywhere it can
+     be read from — not by the keeper of this site, not by anybody who reaches
+     the database. Losing it means being issued another, which means asking
+     the keeper.</p>
+  <p class="note">Give it only to your own family. Anybody holding it can open
+     this tree.</p>
+  <form method="GET" action="/"><button type="submit">I have written it down</button></form>
+</div>`, origin);
 }
 
 /* The invitation page.
@@ -368,7 +425,7 @@ function setCookie(res, req, value) {
    is the local `npm start` case: nothing to protect and nobody to protect it
    from. With a database and nothing configured it fails closed. */
 function gate({
-  passphrase, adminPassphrase, hasDatabase,
+  passphrase, adminPassphrase, hasDatabase, openSignup = false,
   getPool = () => null, getHomeTreeId = () => null, log = console.log
 } = {}) {
   const secret = normalise(passphrase);
@@ -393,9 +450,17 @@ function gate({
       `${secret ? 'legacy deployment passphrase set, ' : ''}` +
       `family passcodes ${hasDatabase ? 'enabled' : 'unavailable (no database)'}. ` +
       `Sessions last ${SESSION_DAYS} days.`);
+  log(openSignup && hasDatabase
+    ? 'Families can start their own tree at /start (MW_OPEN_SIGNUP=off to close it).'
+    : 'Starting a family from outside is off — the keeper issues them.');
 
   const doorLimit = limiter(MAX_ATTEMPTS, WINDOW_MS);
   const appealLimit = limiter(APPEAL_MAX, APPEAL_WINDOW_MS);
+  /* Tighter than the door and tighter than appeals, because this is the only
+     unauthenticated path that creates rows nothing else can reach. Three in an
+     hour is more than any real household needs and far less than a script
+     wants. */
+  const startLimit = limiter(3, 60 * 60 * 1000);
 
   return function gateMiddleware(req, res, next) {
     Promise.resolve(handle(req, res, next)).catch(next);
@@ -425,7 +490,7 @@ function gate({
     if (req.path === '/gate' && req.method === 'POST') {
       if (doorLimit.tooMany(addr)) {
         await audit.record(pool, { ...ctx, kind: 'gate.locked', ok: false });
-        const p = page({ message: 'Too many attempts. Wait a few minutes and try again.',
+        const p = page({ message: 'Too many attempts. Wait a few minutes and try again.', openSignup,
                          status: 429, origin });
         return res.status(p.status).type('html').send(p.html);
       }
@@ -500,14 +565,14 @@ function gate({
         // the handle becomes a way of finding out which families exist.
         await audit.record(pool, { ...ctx, kind: 'gate.fail', ok: false,
           treeId: result.treeId || null, actor, detail: { reason: result.reason } });
-        const p = page({ message: 'That passcode was not recognised.', status: 401, origin });
+        const p = page({ message: 'That passcode was not recognised.', status: 401, origin, openSignup });
         return res.status(p.status).type('html').send(p.html);
       }
 
       doorLimit.note(addr);
       await audit.record(pool, { ...ctx, kind: 'gate.fail', ok: false,
         detail: { reason: 'no_match' } });
-      const p = page({ message: 'That passcode was not recognised.', status: 401, origin });
+      const p = page({ message: 'That passcode was not recognised.', status: 401, origin, openSignup });
       return res.status(p.status).type('html').send(p.html);
     }
 
@@ -548,6 +613,56 @@ function gate({
           ? 'This family\'s tree has been closed by the keeper of this deployment.'
           : 'This invitation cannot be used. It may have been used already, ' +
             'withdrawn, or run out of time. Ask whoever sent it for another.' }));
+    }
+
+    // ── starting a family, from outside ───────────────────────────────────
+    // Offered on the strength of hasDatabase, which is what the door was told
+    // at boot; the POST below checks for the pool itself, because a form that
+    // cannot be submitted is worse than one that was never shown.
+    if (openSignup && hasDatabase && req.path === '/start' && req.method === 'GET') {
+      return res.type('html').send(startPage({ origin }));
+    }
+
+    if (openSignup && hasDatabase && req.path === '/start' && req.method === 'POST') {
+      if (!pool) return refuse(res, origin, 'Starting a family needs a database.');
+      if (startLimit.tooMany(addr)) {
+        return res.status(429).type('html').send(startPage({
+          origin, message: 'That is several families started from here in a ' +
+                           'short time. Try again in an hour — any you have ' +
+                           'already started are untouched.' }));
+      }
+      const name = String(req.body?.name || '').trim().slice(0, 200);
+      if (!name) {
+        return res.status(400).type('html').send(startPage({
+          origin, message: 'Give the family a name first.' }));
+      }
+      startLimit.note(addr);
+      try {
+        const { rows } = await pool.query(
+          `INSERT INTO trees (name, created_by) VALUES ($1, $2)
+           RETURNING id, name, handle`, [name, 'started from the door']);
+        const made = rows[0];
+        const issued = await access.issuePasscode(pool, made.id, { by: 'signup' });
+        /* Signed in on the way out, so the button under the passcode opens
+           their own tree rather than the door they just came through. */
+        const session = await access.createSession(pool, {
+          scope: 'family', treeId: made.id, via: 'created',
+          passcodeGen: issued.passcode_gen, ip, userAgent
+        });
+        setCookie(res, req, session.cookie);
+        await audit.record(pool, { ...ctx, kind: 'family.created', ok: true,
+          treeId: made.id, sessionId: session.id,
+          detail: { name: made.name, handle: made.handle, from: 'signup' } });
+        await audit.record(pool, { ...ctx, kind: 'passcode.set', ok: true,
+          treeId: made.id, sessionId: session.id,
+          detail: { generation: issued.passcode_gen, from: 'signup' } });
+        return res.type('html').send(startedPage({
+          name: made.name, passcode: issued.passcode, origin }));
+      } catch (e) {
+        console.error('start', e);
+        return res.status(500).type('html').send(startPage({
+          origin, message: 'That could not be started just now.' }));
+      }
     }
 
     // ── appeals, from outside ─────────────────────────────────────────────
@@ -641,12 +756,12 @@ function gate({
       });
     }
 
-    const p = page({ status: 401, origin });
+    const p = page({ status: 401, origin, openSignup });
     return res.status(p.status).type('html').send(p.html);
   }
 
   function refuse(res, origin, message) {
-    const p = page({ status: 503, origin, message });
+    const p = page({ status: 503, origin, message, openSignup });
     return res.status(p.status).type('html').send(p.html);
   }
 }
