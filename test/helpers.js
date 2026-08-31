@@ -119,6 +119,7 @@ function loadFrontend(){
       olderThan, seniorityConflicts, birthYear, whyNotNamed,
       setAside, restore, noticesFor, asidePeople, present, mergePeople, meName,
       knownTotem, totemKey, totemsHere, totemSuggestions, MITUPO,
+      sameHouse, mutupoNotes, housesJoined, housesJoin,
       PALETTES, THEMES,
       diffOps, remapId, familyLink, titleFor, treeStamp, TITLE_BUDGET,
       setMe(id){ meId = id; },

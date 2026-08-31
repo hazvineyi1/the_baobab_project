@@ -1850,6 +1850,18 @@ function whyNotNamed(who, tid){
         fix: need[0], need: 'sex'
       };
     }
+    if (r.shape === 'house:one-mutupo'){
+      // What is missing here is a line, not a fact about either person — and
+      // what is already known is worth saying first, since it is the thing the
+      // family would actually go on.
+      const h = sameHouse(who, tid);
+      return {
+        text: `Both ${h ? h.name : 'of one mutupo'} — of one house. Which word ` +
+              `they use depends on where the two lines meet and who is senior, ` +
+              `and that is what is not recorded yet.`,
+        fix: null, need: 'people'
+      };
+    }
     if (/no traced link/.test(r.why || '')){
       return { text: 'Nothing joins them in this tree yet — add the people in between.',
                fix: null, need: 'people' };
@@ -2132,6 +2144,43 @@ function derive(who, tid, byBloodOnly){
     const spouseTerm = marriedIn(who, tid);
     if (spouseTerm) return spouseTerm;
   }
+  /* NO LINE BETWEEN THEM — but that is not the same as nothing between them.
+     See sameHouse() above: one mutupo is one house, and saying so is the whole
+     of what can honestly be said when the lines themselves are not recorded. */
+  const house = sameHouse(who, tid);
+  if (house) return {
+    term: null,
+    shape: 'house:one-mutupo',
+    plain: `somebody of your own house — both ${house.name}`,
+    why: `both ${house.name}${house.means ? ` (${house.means})` : ''} — of one ` +
+         `house, though the line where the two meet is not recorded here`
+  };
+
+  /* TWO HOUSES JOINED BY A MARRIAGE. See housesJoined() above: the marriage
+     joined the houses, not only the couple, so two people who have never met
+     and share no ancestor still stand in a relation — and until now the app
+     told them they were strangers.
+
+     The word is this app's reading of the direction, not something the family
+     dictated pair by pair, so it carries a shape like every other derived term
+     and one tap replaces it. What it will not do is stay silent. */
+  const joined = housesJoin(who, tid);
+  if (joined){
+    const couple = `${state.people[joined.husband].name} and ` +
+                   `${state.people[joined.wife].name}`;
+    return joined.they === 'giving'
+      ? { term:'Vatezvara',
+          shape:'house:joined:they-gave-the-wife',
+          plain:'somebody of the house yours took a wife from',
+          why:`your house and theirs are joined — ${couple} married, and hers ` +
+              `is the house that gave the wife` }
+      : { term:'Vakuwasha',
+          shape:'house:joined:they-took-the-wife',
+          plain:'somebody of the house that took a wife from yours',
+          why:`your house and theirs are joined — ${couple} married, and his ` +
+              `is the house that took the wife` };
+  }
+
   return { term:null, why:'no traced link yet — add the people in between' };
 }
 
@@ -2915,6 +2964,7 @@ function titleFor(anchor, id){
 
 function render(){
   ancestryCache.clear();          // the tree may have changed shape
+  forgetHouses();
   computeLayout();
 
   const svg = [];
@@ -3941,6 +3991,147 @@ function totemKey(raw){
   return String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+/* ── MUTUPO AS A SECOND AXIS ───────────────────────────────────────────────
+
+   THE ASSUMPTION THIS BREAKS. Everything above this line reads kinship as a
+   tree: two people are related if a line of descent and marriage joins them,
+   and if none does, the app had nothing to say — "no traced link yet — add the
+   people in between", which is a Western genealogist's answer and, in a Shona
+   family, usually a false one. Two people of one mutupo ARE of one house. That
+   is not a guess to be made up for by more data entry; it is the thing
+   Zimbabweans actually use to work out whether they are related at all, and it
+   holds whether or not anybody alive can still name the man the two lines meet
+   at.
+
+   WHAT THIS ASSERTS, AND WHAT IT REFUSES TO. It asserts one house. It does NOT
+   produce a kin term, and must not: which word two people of one house use for
+   each other depends on how their lines meet and who is senior, and that is
+   exactly what is not known here. Saying "of one house" is true and useful;
+   guessing Mukoma would be neither.
+
+   The shape is there so a family with a word for this can teach it, the same
+   way they can teach any other. */
+function sameHouse(a, b){
+  const pa = state.people[a], pb = state.people[b];
+  if (!pa || !pb || a === b || !pa.totem || !pb.totem) return null;
+  const ka = totemKey(pa.totem), kb = totemKey(pb.totem);
+  if (!ka || ka !== kb) return null;
+  const known = knownTotem(pa.totem);
+  return { key: ka, name: known ? known.name : pa.totem.trim(),
+           means: known ? known.means : '' };
+}
+
+/* MARRIAGES INSIDE ONE HOUSE, and totems that do not come down the male line.
+
+   Two things a tree cannot see and a house can. Neither is an error and
+   NEITHER IS EVER REFUSED — the app records what the family says happened, and
+   a rule about how things are done is not a rule about what a record may
+   contain. Both are shown where the mitupo are shown, as things worth a second
+   look, in the family's hands and not the app's. */
+function mutupoNotes(){
+  const marriages = [], line = [];
+
+  for (const u of Object.values(state.unions)){
+    const two = (u.partners || []).filter(present);
+    if (two.length !== 2) continue;
+    const h = sameHouse(two[0], two[1]);
+    if (h) marriages.push({ union: u.id, a: two[0], b: two[1], house: h });
+  }
+
+  /* A mutupo comes down the FATHER's line — a woman keeps her own after
+     marrying, and her children take their father's. So a child whose totem is
+     not their father's is worth asking about, and is also perfectly ordinary
+     where a father was never recorded, where a child was raised by another
+     house, or where a family simply writes it differently. It is a question,
+     not a finding. */
+  for (const p of people()){
+    if (!p.totem) continue;
+    const pu = parentUnionOf(p.id);
+    if (!pu) continue;
+    const father = pu.partners.filter(present)
+      .map(id => state.people[id]).find(q => q && q.sex === 'm');
+    if (!father || !father.totem) continue;
+    const kp = totemKey(p.totem), kf = totemKey(father.totem);
+    if (kp && kf && kp !== kf) line.push({ id: p.id, father: father.id });
+  }
+
+  return { marriages, line };
+}
+
+/* ── HOUSES, NOT JUST PEOPLE ───────────────────────────────────────────────
+
+   A marriage in Shona is not two people joining. It is two HOUSES joining, and
+   the relation it makes runs between everybody on one side and everybody on
+   the other — which is the part a family tree drawn as descent cannot show at
+   all. It draws one line between two people and leaves forty relatives on
+   either side of it looking like strangers to each other.
+
+   THE DIRECTION MATTERS AND IS NOT SYMMETRICAL. Roora runs one way: the
+   husband's house takes a wife and gives cattle, the wife's house gives a wife
+   and receives them. So the wife's people are vaTezvara to the husband's
+   people, and the husband's people are vaKuwasha to hers — the same two words
+   the family already gave for the individuals, standing for the whole side.
+
+   Both sexes have to be recorded for a marriage to say which way it runs,
+   which is why one with a sex missing is skipped rather than guessed at.
+
+   Derived, never stored — the same rule every kinship term in this app is held
+   to. A house is its mutupo and the marriages are already in the tree; writing
+   the conclusion down as well would only give it somewhere to go stale. */
+/* Worked out once per change, not once per pair.
+
+   This is read from inside derive(), which the card titles call four hundred
+   times in a row, and each call would otherwise walk every marriage in the
+   family. Measured against the same trees before and after, the difference is
+   inside the noise — so this is a guard against a cost that has not arrived
+   rather than a fix for one that has, and it is kept because the shape of the
+   call is what makes it a risk: a per-pair read of a whole-tree fact.
+
+   The answer only changes when the tree does, so it is emptied where the tree
+   is drawn and where it is saved, and those two between them cover every way
+   it can change. Nothing but speed rides on it: a miss recomputes. */
+let joinedCache = null;
+function forgetHouses(){ joinedCache = null; }
+
+function housesJoined(){
+  if (joinedCache) return joinedCache;
+  const links = [];
+  for (const u of Object.values(state.unions)){
+    const two = (u.partners || []).filter(present);
+    if (two.length !== 2) continue;
+    const a = state.people[two[0]], b = state.people[two[1]];
+    if (!a || !b || !a.totem || !b.totem) continue;
+    const ka = totemKey(a.totem), kb = totemKey(b.totem);
+    if (!ka || !kb || ka === kb) continue;
+    const wife    = a.sex === 'f' ? two[0] : b.sex === 'f' ? two[1] : null;
+    const husband = a.sex === 'm' ? two[0] : b.sex === 'm' ? two[1] : null;
+    if (!wife || !husband) continue;      // no direction without both
+    links.push({
+      union: u.id, wife, husband,
+      giving: totemKey(state.people[wife].totem),     // her house gave a wife
+      taking: totemKey(state.people[husband].totem)   // his house took one
+    });
+  }
+  joinedCache = links;
+  return links;
+}
+
+/* Where the two people stand relative to each other by their HOUSES, when
+   nothing else joins them. Returns the marriage that made it, so the answer
+   can name the couple whose joining it is — which is what an elder would say
+   first, and what makes the claim checkable. */
+function housesJoin(who, tid){
+  const mine = state.people[who], theirs = state.people[tid];
+  if (!mine || !theirs || !mine.totem || !theirs.totem) return null;
+  const km = totemKey(mine.totem), kt = totemKey(theirs.totem);
+  if (!km || !kt || km === kt) return null;
+  for (const l of housesJoined()){
+    if (l.taking === km && l.giving === kt) return { ...l, they: 'giving' };
+    if (l.giving === km && l.taking === kt) return { ...l, they: 'taking' };
+  }
+  return null;
+}
+
 /* Which totems this family carries, commonest first. */
 function totemsHere(){
   const groups = new Map();
@@ -4008,6 +4199,14 @@ function openTotems(){
   pending = { kind:'dupes', anchorId: sel || state.rootId };
   const groups = totemsHere();
   const without = people().filter(p => !p.totem).length;
+  const notes = mutupoNotes();
+  // One row per pair of houses, not one per marriage — a family with six
+  // marriages into one house is joined to one house, and saying it six times
+  // is a list rather than an answer.
+  const joins = [];
+  for (const l of housesJoined()){
+    if (!joins.some(x => x.giving === l.giving && x.taking === l.taking)) joins.push(l);
+  }
 
   const el = document.createElement('div');
   el.id = 'form';
@@ -4035,6 +4234,54 @@ function openTotems(){
         `${without === 1 ? 'person has' : 'people have'} no totem recorded.</p>`
       : '') +
 
+    /* WHAT THE HOUSES SAY THAT THE TREE CANNOT.
+       Both of these are questions, never findings, and neither has ever
+       stopped anything being saved. The app records what the family says
+       happened; a rule about how things are done is not a rule about what a
+       record may contain. */
+    /* WHICH HOUSES THIS FAMILY IS JOINED TO, and by whose marriage. A tree
+       draws one line between a couple; this says what that line did to
+       everybody standing behind each of them. */
+    (joins.length
+      ? `<p class="lbl" style="margin-top:16px;">Houses yours is joined to</p>` +
+        `<p class="covnote">A marriage joins two houses, not two people. ` +
+        `Everybody on one side stands in a relation to everybody on the other, ` +
+        `whether or not they have met.</p>` +
+        joins.map(l => {
+          const g = knownTotem(state.people[l.wife].totem);
+          const t = knownTotem(state.people[l.husband].totem);
+          return `<p class="covnote">` +
+            `<b>${esc(t ? t.name : state.people[l.husband].totem)}</b> took a wife ` +
+            `from <b>${esc(g ? g.name : state.people[l.wife].totem)}</b> — ` +
+            `${esc(kinName(l.husband))} and ${esc(kinName(l.wife))}</p>`;
+        }).join('')
+      : '') +
+
+    (notes.marriages.length
+      ? `<p class="lbl" style="margin-top:16px;">Married inside one house</p>` +
+        `<p class="covnote">Traditionally people of one mutupo do not marry, ` +
+        `so this is worth a second look — a totem written down in haste, or two ` +
+        `people who are of one house and know it. Nothing here is refused.</p>` +
+        notes.marriages.map(m =>
+          `<p class="covnote"><b>${esc(kinName(m.a))}</b> and ` +
+          `<b>${esc(kinName(m.b))}</b> — both ${esc(m.house.name)}</p>`).join('')
+      : '') +
+
+    (notes.line.length
+      ? `<p class="lbl" style="margin-top:16px;">A totem not down the father's line</p>` +
+        `<p class="covnote">A mutupo comes down the father's line — a woman ` +
+        `keeps her own after marrying, and her children take their father's. ` +
+        `These carry a different one from the father recorded for them, which ` +
+        `is ordinary where a child was raised by another house and worth ` +
+        `checking where it was not.</p>` +
+        notes.line.map(n =>
+          `<button type="button" class="askrow" data-open-person="${esc(n.id)}">` +
+            `<u>${esc(kinName(n.id))}` +
+              `<small>${esc(state.people[n.id].totem)} · ` +
+              `${esc(kinName(n.father))} is ${esc(state.people[n.father].totem)}</small></u>` +
+            `<em>open</em></button>`).join('')
+      : '') +
+
     `<div class="row"><button class="btn" id="totNo">Done</button></div>`;
   document.body.appendChild(el);
   placeForm(el);
@@ -4047,6 +4294,10 @@ function openTotems(){
     render(); bringIntoView(sel); revealBuds();
     say(`${g.people.length} ${g.people.length === 1 ? 'person' : 'people'} of ` +
         `${g.known ? g.known.name : b.dataset.totemGroup}.`);
+  });
+  el.querySelectorAll('[data-open-person]').forEach(b => b.onclick = () => {
+    const id = b.dataset.openPerson;
+    closeForm(); sel = id; render(); bringIntoView(id); openCard(id);
   });
   $('totNo').onclick = closeForm;
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
@@ -4856,6 +5107,13 @@ function openKinship(){
                'record which, and the word follows') +
         gapRow(cov.gaps.unlinked.length, 'no traced link between them',
                'add the people in between') +
+        /* NOT a gap of the same kind, and it earns its own row for that
+           reason. Nothing about either person is missing: they are of one
+           house and the app says so. What is not recorded is where the two
+           lines meet — which is a thing to go and ask an elder about, not a
+           field to fill in. */
+        gapRow(cov.gaps.house.length, 'of one house, with the line not recorded',
+               'one mutupo — ask where the two lines meet') +
         gapRow(cov.gaps.described.length, 'described rather than named',
                'pick the pair above and tell the app what your family calls it') +
         `</div>`) +
@@ -5392,13 +5650,16 @@ function kinshipCoverage(budget){
     }
   }
 
-  const gaps = { seniority: [], sex: [], unlinked: [], described: [] };
+  const gaps = { seniority: [], sex: [], unlinked: [], described: [], house: [] };
   let named = 0;
   for (const [a, b] of pairs){
     const r = relationship(a, b);
     if (!r) continue;
     if (r.term){ named++; continue; }
     if (r.choice) gaps.seniority.push([a, b]);
+    // A house link is not a gap of the same kind: nothing about either person
+    // is missing, only the line where their two lines meet.
+    else if (r.shape === 'house:one-mutupo') gaps.house.push([a, b]);
     else if (/no traced link/.test(r.why)) gaps.unlinked.push([a, b]);
     else if (!state.people[a].sex || !state.people[b].sex) gaps.sex.push([a, b]);
     else gaps.described.push([a, b]);
@@ -6407,6 +6668,9 @@ function diffOps(was, now){
 function save(){
   // A browser that could not read the tree does not get to write to it.
   if (store === 'stalled') return;
+  // Which houses are joined may have changed with whatever is being saved.
+  // render() clears this too; both are here because either can come first.
+  forgetHouses();
   clearTimeout(timer);
   timer = setTimeout(flush, 400);
   // The answer to "who might be the same person" is now stale. Asking is
