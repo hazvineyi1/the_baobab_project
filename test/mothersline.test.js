@@ -483,5 +483,48 @@ const why  = (fe, a, b) => { const t = shown(fe, a, b); return t ? t.why : ''; }
     eq('and offers no record to open, because there is none', gap.fix, null);
   }
 
+  /* ── WHOSE SIDE THE PANEL IS SPEAKING FROM ─────────────────────────────
+     Reported off a screenshot: the panel had been asked what Hazvineyi is to
+     AGNES, answered Mwanasikana, and then explained it as "your sister Evelyn
+     Mandaba's child". Whoever was reading had no sister Evelyn. The rule was
+     right and the sentence was a lie, which is worse than a gap — a family
+     checking the app's reasoning is being shown reasoning about somebody
+     else. */
+  section('a verdict about two other people is worded about THEM');
+  {
+    const fe = loadFrontend();
+    const gf = fe.addPerson('Sydney', 'm', 'Nzou', '1940', '');
+    const agnes  = fe.addPerson('Agnes Mandaba',  'f', 'Shava', '1950', '');
+    const evelyn = fe.addPerson('Evelyn Mandaba', 'f', 'Shava', '1954', '');
+    fe.addUnion([gf, null].filter(Boolean), [agnes, evelyn]);
+    const haz = fe.addPerson('Hazvineyi Belinda', 'f', 'Nzou', '1979', '');
+    fe.addUnion([evelyn], [haz]);
+
+    // Nobody has said who is holding the phone, which is the state the
+    // screenshot was taken in.
+    fe.setMe(null);
+    const html = fe.kinVerdict(agnes, haz, {});
+    // The trace itself — the part that explains the word. The rest of the
+    // panel is addressed to whoever is reading ("what your family says"), and
+    // that second person is correct and must survive this.
+    const trace = (html.match(/<span>([^<]*)</) || [])[1] || '';
+    check('the word is still right', /Mwanasikana/.test(html), html.slice(0, 200));
+    check('the trace calls nobody\'s relatives yours',
+          !/\byour\b/.test(trace), trace);
+    check('it names whose sister she is', /Agnes's sister/.test(trace), trace);
+    check('and the prompt asking about the shape says whose too',
+          /read <b>Mwanasikana<\/b> from <b>Agnes's sister's child<\/b>/.test(html),
+          html.slice(200, 500));
+    check('while the question is still put to the reader',
+          /Is that what your family says\?/.test(html));
+
+    // And from the other side: when the reckoning DOES start from whoever is
+    // reading, the second person is right and must stay.
+    fe.setMe(agnes);
+    const mine = fe.kinVerdict(agnes, haz, {});
+    check('your own reckoning still says "your"', /\byour sister\b/.test(mine),
+          mine.slice(0, 300));
+  }
+
   report();
 })();

@@ -1824,6 +1824,28 @@ function whyNotNamed(who, tid){
   return null;
 }
 
+/* TURN A TRACE ROUND TO FACE WHOEVER IT IS RECKONED FROM.
+
+   Every trace the engine produces is written in the second person — "your
+   mother's brother" — because the reckoning normally starts from the person
+   reading. It does not always, and where it does not, the wording is simply
+   false: the kinship panel asks what one person is to ANOTHER, and a line
+   joins two people who may both be strangers to whoever is holding the phone.
+   Left alone, both would say "your sister Evelyn Mandaba's child" to somebody
+   who is not Agnes and has no such sister.
+
+   By first name, because the full one is usually already in the sentence and
+   saying it three times in two lines is how a panel stops being read. The
+   text is already escaped where this is called, and a first name is not a
+   pattern — hence the plain word boundaries and no name in a regexp. */
+function facing(text, fromId){
+  if (!fromId || fromId === meId) return text;
+  const p = state.people[fromId];
+  if (!p) return text;
+  const first = esc((p.name || '').split(' ')[0] || 'they');
+  return String(text).replace(/\byour\b/g, first + "'s").replace(/\byou\b/g, first);
+}
+
 /* The term for `tid` as seen by `who`, with the trace that produced it.
  
    A thin wrapper: the engine below is unchanged, and anything it names is
@@ -4275,7 +4297,7 @@ function kinVerdict(from, to, how){
         `<p class="relline${i ? ' also' : ''}${t.taught ? ' taught' : ''}">` +
           `<b>${esc(t.term)}${i === 0 && k.list.length > 1 ? '' : ''}</b>` +
           `<span>${i === 0 ? `${esc(kinName(to))} is ${esc(kinName(from))}'s ` : 'and also '}` +
-          `${esc(t.term)} — ${esc(t.why)}` +
+          `${esc(t.term)} — ${facing(esc(t.why), from)}` +
           `${t.affirmed ? ` <i>· agreed by your family${t.by ? ', ' + esc(t.by) : ''}` +
                           `${t.note ? ' — ' + esc(t.note) : ''}</i>` : ''}` +
           `${t.taught ? ` <i>· your family's word${t.by ? ', from ' + esc(t.by) : ''}` +
@@ -4289,7 +4311,7 @@ function kinVerdict(from, to, how){
     : (() => {
         const gap = whyNotNamed(from, to);
         return `<p class="relline none"><b>Not named yet</b><span>` +
-          `${esc(kinName(to))} is ${esc(kinName(from))}'s relative — ${esc(r.why)}` +
+          `${esc(kinName(to))} is ${esc(kinName(from))}'s relative — ${facing(esc(r.why), from)}` +
           `${gap ? `<br>${esc(gap.text)}` : ''}</span></p>` +
           (gap && gap.fix
             ? `<div class="row"><button type="button" class="btn ghost wide" ` +
@@ -4302,7 +4324,7 @@ function kinVerdict(from, to, how){
   if (!k.list.length && r.shape){
     return head +
       `<div class="teach" data-shape="${esc(r.shape)}">` +
-        `<p>Shona may have a word for <b>${esc(r.plain || 'this')}</b> that this app ` +
+        `<p>Shona may have a word for <b>${facing(esc(r.plain || 'this'), from)}</b> that this app ` +
         `does not know. If your family uses one, name it — every pair related ` +
         `this way will carry it from then on.</p>` +
         `<div class="row">` +
@@ -4332,7 +4354,7 @@ function kinVerdict(from, to, how){
               : t.affirmed
               ? `Your family has agreed that <b>${esc(t.term)}</b> is the word here.`
               : `This app read <b>${esc(t.term)}</b> from ` +
-                `<b>${esc(t.plain || 'this')}</b>. Is that what your family says?`}</p>` +
+                `<b>${facing(esc(t.plain || 'this'), from)}</b>. Is that what your family says?`}</p>` +
         (t.taught || t.affirmed ? '' :
           `<div class="row"><button type="button" class="btn affirmgo">` +
             `Yes, that is the word</button></div>`) +
@@ -4575,17 +4597,6 @@ function openLine(fromId, toIds){
 
   const nameOf = id => esc(state.people[id].name);
   const firstOf = id => esc((state.people[id].name || '').split(' ')[0] || 'they');
-
-  /* The traces are written in the second person — "your mother's brother" —
-     because everywhere else the person doing the asking IS the person being
-     reckoned from. On a line between two OTHER people they are not, and left
-     alone the panel would tell Bertha that her own son is "your son" when the
-     son in question is not hers to whoever is reading. So the wording is
-     turned round to name whoever the reckoning starts from — by first name,
-     since the full one is already in the sentence above it and saying it
-     three times in two lines is how a panel stops being read. */
-  const facing = (text, a) => a === meId ? text
-    : text.replace(/\byour\b/g, firstOf(a) + "'s").replace(/\byou\b/g, firstOf(a));
 
   /* A trace earns its place when it names a PATH — "Ida's mother's brother"
      says something the word alone does not. A direct link does not: "Amai —
