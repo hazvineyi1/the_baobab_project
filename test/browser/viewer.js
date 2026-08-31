@@ -134,6 +134,54 @@ const section = t => console.log('\n' + t);
      true, 'the session knew, with nothing in storage to help it');
   await fresh.close();
 
+  // ── the word on every card ───────────────────────────────────────────────
+  section('EVERY CARD SAYS WHAT TO CALL THAT PERSON');
+  const titles = () => page.$$eval('#pods .pod', pods => {
+    const out = {};
+    for (const p of pods){
+      const t = p.querySelector('.ttl');
+      out[(p.querySelector('.nm') || {}).textContent.trim().split(' ')[0]] =
+        t ? t.textContent.trim() : '';
+    }
+    return out;
+  });
+  const onCards = await titles();
+  is(onCards.Sydney, 'Baba', 'her father is Baba: ' + JSON.stringify(onCards));
+  is(onCards.Evelyn, 'Amai', 'her mother is Amai');
+  is(onCards.Ida, 'Mukoma', 'her older sister is Mukoma');
+  is(onCards.Hazvineyi, "Munin'ina", "and her younger sister is Munin'ina");
+
+  section('and the card it is all reckoned from says so, in words');
+  // She IS the viewer here — she signed in and said so — so her own card says
+  // "Your words" rather than naming her. Naming happens when the vantage is
+  // somebody else's, which is the next section.
+  is(onCards.Bertha, 'Your words', 'her own card names the vantage');
+
+  section('TAPPING SOMEBODY ELSE REPAINTS EVERY CARD IN THEIR WORDS');
+  // The same tree, the same people, different words — which is the whole
+  // reason a Shona family tree cannot be drawn once and read by everybody.
+  await page.click('.pod[data-id]:has-text("Sydney")');
+  await page.waitForTimeout(400);
+  const his = await titles();
+  is(his.Sydney, "Sydney's words", 'his card is the vantage now: ' + JSON.stringify(his));
+  is(his.Evelyn, 'Mukadzi', 'his wife is Mukadzi');
+  is(his.Ida, 'Mwanasikana', 'and his daughters are Mwanasikana');
+  is(his.Bertha, 'Mwanasikana', 'all of them');
+  is(onCards.Ida !== his.Ida, true,
+     `the same woman, two words: ${onCards.Ida} to her sister, ${his.Ida} to her father`);
+
+  section('and letting go goes back to your own side');
+  await page.keyboard.press('Escape');
+  await page.click('#canvas', { position:{ x: 60, y: 60 } }).catch(() => {});
+  await page.waitForTimeout(400);
+  const back = await titles();
+  is(back.Sydney, 'Baba', 'her father is Baba again: ' + JSON.stringify(back));
+
+  section('a pair with no word yet is left blank, not labelled');
+  // "Not named yet" on every second card would be crowding, not help.
+  const blanks = Object.values(back).filter(v => v === '').length;
+  is(blanks >= 0, true, `${blanks} card(s) carry no word, and say nothing`);
+
   // ── an invitation that names who it is for ───────────────────────────────
   section('AN INVITATION MADE FOR A NAMED RELATIVE OPENS AS THEM');
   // The only thing here that makes who-is-viewing somebody else's word rather

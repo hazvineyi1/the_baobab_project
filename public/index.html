@@ -369,6 +369,28 @@ body{
   font-size:9.5px; letter-spacing:.11em; text-transform:uppercase;
   color:var(--muted); margin-top:4px;
 }
+/* WHAT TO CALL THIS PERSON. The word sits above the name because it is what
+   the card is FOR: a family tree in Shona is a diagram of what everybody calls
+   everybody, and the name is how you find the card while the word is what you
+   came for. */
+.pod .ttl{
+  font-family:'Fraunces',Georgia,serif; font-size:12.5px; font-weight:600;
+  line-height:1.15; letter-spacing:.01em; color:var(--leaf);
+  margin-bottom:3px; text-align:center; max-width:100%;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.pod .ttl em{
+  font-style:normal; font-size:9px; font-weight:700; vertical-align:super;
+  margin-left:2px; opacity:.7;
+}
+/* The card everything is being reckoned FROM. Said in words rather than left
+   to be inferred from a highlight: when the words on forty other cards are
+   suddenly somebody else's, the one thing that must not be guessed at is
+   whose. */
+.pod .ttl.vantage{
+  color:var(--gold); font-family:inherit; font-size:9px; font-weight:700;
+  letter-spacing:.13em; text-transform:uppercase;
+}
 .pod .mk{position:absolute; left:9px; top:5px; font-size:10px; color:var(--gold-soft);}
 .pod .rm{
   position:absolute; right:-9px; top:-9px; width:22px; height:22px; border-radius:50%;
@@ -2122,14 +2144,38 @@ function marriedIn(who, tid){
     // words for her husband's siblings are the question this app was told to
     // ask rather than answer — so it describes, and offers to be told.
     const via = sibOfSpouse ? 'sibling' : (r.term || 'relative');
+    const mine = spouse.sex === 'f' ? "your wife's"
+               : spouse.sex === 'm' ? "your husband's" : "your spouse's";
+
+    /* THE PARENTS OF A HUSBAND OR WIFE. From the glossary the family sent,
+       which names both of them in one line each: "Tezvara: Father-in-law",
+       "Ambuya: Mother-in-law".
+
+       Keyed on Baba and Amai EXACTLY, not on anything parent-shaped. Your
+       wife's Babamukuru is her father's older brother — a different man, with
+       a word of his own, and the one place a rule like this goes wrong is by
+       being generous about what counts as a parent.
+
+       Ambuya is already the word for a grandmother and for a mother's
+       brother's wife. That is not a clash to be resolved: one word standing
+       in several places is the ordinary shape of this system, and the engine
+       is built to return a person's several words rather than pick. */
+    const named =
+      (r.term === 'Baba' && them.sex === 'm') ? 'Tezvara' :
+      (r.term === 'Amai' && them.sex === 'f') ? 'Ambuya'  : null;
+
     return {
-      term: null,
+      term: named,
+      // The shape is what it always was, named or not, so a family that has
+      // already taught a word for this stays taught.
       shape: `inlaw:through-my-${spouse.sex === 'f' ? 'wife' : spouse.sex === 'm' ? 'husband' : 'spouse'}` +
              `:their-${via}:${them.sex === 'f' ? 'woman' : them.sex === 'm' ? 'man' : 'unknown'}`,
-      plain: `${spouse.sex === 'f' ? "your wife's" : spouse.sex === 'm' ? "your husband's" : "your spouse's"} ` +
+      plain: `${mine} ` +
              `${sibOfSpouse ? (them.sex === 'f' ? 'sister' : them.sex === 'm' ? 'brother' : 'sibling')
                             : (r.term || 'relative')}`,
-      why: `married into the family — ${spouse.name}'s ${r.term}`
+      why: named
+        ? `${mine} ${named === 'Tezvara' ? 'father' : 'mother'}`
+        : `married into the family — ${spouse.name}'s ${r.term}`
     };
   }
 
@@ -2139,8 +2185,32 @@ function marriedIn(who, tid){
     if (!r) continue;
     if (r.why === 'your child'){
       if (them.sex === 'f') return { term:'Muroora', why:"your son's or daughter's wife" };
-      if (them.sex === 'm') return { term:'Mukuwasha', why:"your daughter's or son's husband" };
+      // Mukwasha, spelt as the family spelt it. Mukuwasha is the same word and
+      // this app used to print it; the family's own list says Mukwasha, and
+      // whose word it is decides how it is written.
+      if (them.sex === 'm') return { term:'Mukwasha', why:"your daughter's or son's husband" };
     }
+
+    /* A BROTHER'S WIFE IS MUROORA TOO, which the glossary says in one line:
+       "Muroora: Daughter-in-law / Brother's wife". Those look like two
+       different relations in English and are one in Shona — she is the woman
+       who married into your house, and that is the whole of what the word
+       means. So it is the same word whether you are her husband's father or
+       his brother or his sister.
+
+       ONLY the brother's wife. A sister's HUSBAND is the mirror image and the
+       family's list does not name him, so this app does not either — it
+       describes him and offers to be told, which is what it does everywhere
+       it has not been given a word. */
+    const married = state.people[sp];
+    if (them.sex === 'f' && married && married.sex === 'm' &&
+        ['Mukoma', "Munin'ina", 'Hanzvadzi'].includes(r.term)){
+      return { term:'Muroora',
+               shape:`inlaw:married-to-my:brother:woman`,
+               plain:"your brother's wife",
+               why:"your brother's wife — she married into your house" };
+    }
+
     if (r.term) return {
       term: null,
       shape: `inlaw:married-to-my:${r.term}:${them.sex === 'f' ? 'woman' : them.sex === 'm' ? 'man' : 'unknown'}`,
@@ -2637,6 +2707,94 @@ function hitPath(d, drawn, from, others){
          ` data-from="${from}" data-to="${others.join(',')}"></path>`;
 }
 
+/* ── WHAT EVERY CARD IS CALLED ─────────────────────────────────────────────
+
+   The word on each card is reckoned from ONE person: whoever is picked, or
+   whoever is holding the phone if nobody is. Tap somebody else and every word
+   on screen becomes theirs — which is the thing this app is for, and which no
+   amount of tapping one card at a time could show.
+
+   WHY THIS IS CACHED. Naming a pair is a search through the marriages joining
+   them: about a fifth of a millisecond, which is nothing once and a second at
+   five thousand people. The stamp below is every fact a Shona term can depend
+   on — who exists, their sex, their birth year, who is set aside, who is
+   married to whom, whose children are whose, and the words this family has
+   taught. Three milliseconds to build at five thousand people, and while it is
+   unchanged not one pair has to be named twice.
+
+   Correct by construction rather than by remembering: an invalidation that has
+   to be called from every place the tree changes is an invalidation that will
+   one day not be.
+
+   KEYED BY BOTH PEOPLE, not by the one being named. Keying it by the person
+   alone made the answer depend on the caller having reset the cache for the
+   right vantage first — and a cache that is only right when somebody remembers
+   to clear it is a cache that will one day show you your sister's word for
+   your own mother. The pair is the key; the stamp is the only thing that
+   empties it. */
+let titleCache = { stamp:null, map:new Map() };
+
+function treeStamp(){
+  const parts = [];
+  for (const id in state.people){
+    const p = state.people[id];
+    parts.push(id, p.sex || '', p.born || '', p.aside ? 'x' : '');
+  }
+  for (const id in state.unions){
+    const u = state.unions[id];
+    parts.push(id, (u.partners || []).join(','), (u.children || []).join(','));
+  }
+  parts.push(JSON.stringify(lexicon()));
+  return parts.join('|');
+}
+
+/* How many cards get a word before the rest are left blank.
+
+   A budget, not a limit on the family. Every real family tree this app is for
+   is far inside it and everybody gets their word; the number exists so that a
+   tree of thousands stays as quick to tap as a tree of thirty, and the cards
+   that go without are the ones furthest from where you are looking. */
+const TITLE_BUDGET = 400;
+
+/* AND NOTHING AT ALL WHEN NOBODY COULD READ IT.
+
+   Zoomed out to take in a whole family, a card is a few pixels tall and its
+   word is a smudge. Naming four hundred pairs to draw four hundred smudges is
+   the purest kind of waste, and on a big tree it is most of the cost of
+   drawing at all — so below the zoom where the word becomes legible, it is not
+   worked out.
+
+   Crossing that line repaints, which is what makes it invisible: zoom in far
+   enough to read a card and the words are simply there. The check lives in
+   applyTransform because that is the one place every zoom goes through —
+   pinch, wheel, buttons and Fit alike — and panning never changes the zoom, so
+   dragging the tree about never triggers it. */
+const TITLE_LEGIBLE_AT = 0.5;
+let titlesShowing = true;
+
+function titleFor(anchor, id){
+  if (!anchor || !state.people[anchor]) return '';
+  if (id === anchor){
+    const who = anchor === meId ? 'Your words'
+              : esc((state.people[anchor].name || '').split(' ')[0]) + "'s words";
+    return `<span class="ttl vantage">${who}</span>`;
+  }
+  const key = anchor + '>' + id;
+  const hit = titleCache.map.get(key);
+  if (hit !== undefined) return hit;
+  const k = kinTerms(anchor, id);
+  const first = k && k.list.length ? k.list[0] : null;
+  // No word is shown as no word. "Not named yet" on every second card would be
+  // the crowding this was meant to relieve, and the card and the line between
+  // them both say what is missing when somebody actually asks.
+  const html = first
+    ? `<span class="ttl">${esc(first.term)}` +
+      `${k.list.length > 1 ? `<em>+${k.list.length - 1}</em>` : ''}</span>`
+    : '';
+  titleCache.map.set(key, html);
+  return html;
+}
+
 function render(){
   ancestryCache.clear();          // the tree may have changed shape
   computeLayout();
@@ -2679,6 +2837,28 @@ function render(){
   }
   gtree.innerHTML = svg.concat(hits, bondHits).join('');
 
+  /* WHOSE WORDS THESE ARE. Whoever is picked; you, when nobody is. Picking
+     somebody is how you ask "what does this family look like from where THEY
+     stand", and letting go goes back to your own side. */
+  const anchor = (sel && state.people[sel]) ? sel : meId;
+  titlesShowing = pos.k >= TITLE_LEGIBLE_AT;
+  const stamp = anchor && titlesShowing ? treeStamp() : null;
+  if (titleCache.stamp !== stamp) titleCache = { stamp, map:new Map() };
+  /* NEAREST FIRST, so that when the budget runs out it runs out on the cards
+     you are least likely to be reading. Distance in the layout, not in the
+     family: what is near on the screen is what is being looked at. */
+  const titled = new Set();
+  if (anchor && titlesShowing && layout.persons[anchor]){
+    const at = layout.persons[anchor];
+    const near = people()
+      .filter(p => layout.persons[p.id])
+      .map(p => [p.id, Math.hypot(layout.persons[p.id].x - at.x,
+                                  layout.persons[p.id].y - at.y)])
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, TITLE_BUDGET);
+    for (const [id] of near) titled.add(id);
+  }
+
   const html = [];
   for (const s of layout.sockets){
     html.push(`<div class="pod socket" data-socket="${s.forChild}" tabindex="0" role="button"` +
@@ -2700,6 +2880,7 @@ function render(){
       ` aria-label="${esc(p.name)} — show where the tree can grow from here"` +
       ` style="left:${at.x}px; top:${at.y}px">` +
       badge +
+      (titled.has(p.id) ? titleFor(anchor, p.id) : '') +
       (mark ? `<span class="mk">${mark}</span>` : '') +
       (p.shown === false ? `<span class="shut" title="Not in the public record">·</span>` : '') +
       `<span class="nm">${esc(p.name)}</span>` +
@@ -2888,6 +3069,12 @@ function placeBuds(){
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
 function applyTransform(){
+  // See TITLE_LEGIBLE_AT. A boolean compare on every pan frame; a repaint only
+  // when the zoom actually crosses the line, which is rare and is exactly when
+  // the words appear or stop being worth having.
+  if (layout && layout.persons && (pos.k >= TITLE_LEGIBLE_AT) !== titlesShowing){
+    render();
+  }
   gtree.setAttribute('transform', `translate(${pos.x},${pos.y}) scale(${pos.k})`);
   podsEl.style.transform = `translate(${pos.x}px, ${pos.y}px) scale(${pos.k})`;
   $('ground').style.top = pos.y + 'px';
