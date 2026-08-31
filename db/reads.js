@@ -7,7 +7,7 @@
 
 const { badRequest, notFound } = require('./errors');
 
-const PERSON_COLS = `id, name, sex, totem, born, born_year, died, is_root,
+const PERSON_COLS = `id, name, also_known_as, sex, totem, born, born_year, died, is_root,
                      added_by, aside_at, aside_by, aside_why, merged_into,
                      visibility, visibility_by, visibility_at,
                      mw_is_living(died, born_year) AS is_living,
@@ -210,7 +210,12 @@ async function search(pool, treeId, q, { limit = 25 } = {}) {
             -- name_key is empty when a record is nothing but an honorific
             -- ("Baba"). Such a person is not a duplicate candidate, but they
             -- must still be findable, so fall back to the raw name.
-            OR (name_key = '' AND lower(name) LIKE '%' || $2 || '%'))
+            OR (name_key = '' AND lower(name) LIKE '%' || $2 || '%')
+            -- THE OTHER NAME SHE ANSWERS TO. A woman recorded under her own
+            -- house's surname is looked for under her husband's by everybody
+            -- who met her after the wedding, and a search that cannot find
+            -- her is a search that says she is not in the family.
+            OR (also_known_as <> '' AND lower(also_known_as) LIKE '%' || $2 || '%'))
      ORDER BY exact DESC, prefix DESC, score DESC, born_year ASC NULLS LAST
      LIMIT $3` : `
     SELECT ${PERSON_COLS},

@@ -735,6 +735,43 @@ body{
 }
 #stalled button:hover{border-color:var(--gold); color:var(--gold);}
 
+/* The banner. Two pills with the canvas showing between them, so it names
+   the place without walling off the top of the tree. */
+#top{
+  position:fixed; left:14px; right:14px; top:14px; z-index:46;
+  display:flex; align-items:center; gap:10px; pointer-events:none;
+}
+#top .brand{
+  pointer-events:auto;
+  padding:8px 16px; border-radius:999px;
+  background:var(--pod); border:1.5px solid var(--pod-edge); box-shadow:var(--shadow);
+  font-family:'Fraunces',Georgia,serif; font-size:14px; font-weight:600;
+  color:var(--ink); letter-spacing:.01em; white-space:nowrap;
+}
+#top .brand em{font-style:italic; color:var(--leaf);}
+#top .set{
+  margin-left:auto; pointer-events:auto;
+  display:flex; align-items:center; gap:2px; padding:6px;
+  background:var(--pod); border:1.5px solid var(--pod-edge);
+  border-radius:999px; box-shadow:var(--shadow);
+  max-width:min(70vw, 620px);
+}
+#top .set button{
+  padding:7px 13px; border-radius:999px; cursor:pointer;
+  background:transparent; border:none; color:var(--muted);
+  font-family:'Karla',sans-serif; font-size:12.5px; font-weight:600;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:230px;
+}
+#top .set button:hover{background:var(--pod-hi); color:var(--ink);}
+#top .set .who b{color:var(--leaf); font-weight:700;}
+#top .set .who.active{background:var(--leaf); border-color:var(--leaf); color:var(--sky);}
+#top .set .who.active b{color:var(--sky);}
+#top .set .who.fixed{cursor:default; border:1.5px dashed var(--leaf);}
+/* The way out. Quiet until it is wanted — it is not an action anybody is
+   looking for until they are, and then it must be the obvious one. */
+#top #signout{color:var(--muted);}
+#top #signout:hover{background:rgba(156,97,25,.14); color:var(--gold);}
+
 #bar{
   position:fixed; left:14px; bottom:14px; z-index:45;
   display:flex; align-items:center; gap:2px; padding:6px;
@@ -837,6 +874,11 @@ body{
 }
 @media (max-width:600px){
   #hint{display:none;}
+  /* On a phone the family and who you are are what matter; the project's own
+     name is on the tab and on the door they came through. */
+  #top .brand{display:none;}
+  #top .set{max-width:calc(100vw - 28px);}
+  #top .set button{font-size:12px; padding:7px 10px; max-width:150px;}
   #bar button{padding:7px 10px; font-size:12px;}
 }
 </style>
@@ -886,16 +928,33 @@ body{
   </p>
 </div>
 
+<!-- WHERE YOU ARE AND WHO YOU ARE, at the top, always.
+
+     The two facts every other word on the screen depends on. Which family
+     this is comes from the session — the passcode decides it, not the link —
+     and who you are is what every Shona term is reckoned from. They used to
+     be two buttons among ten along the bottom, which is where you put a
+     setting, not where you put the answer to "whose tree am I looking at".
+
+     Signing out lives here too, beside them, because a way in that has no
+     visible way out is a door that only opens. -->
+<div id="top" hidden>
+  <span class="brand">The <em>Muwuyu</em> Project</span>
+  <span class="set">
+    <button class="who" id="family" hidden>This family</button>
+    <button class="who" id="who">You: <b>—</b></button>
+    <button class="who" id="signout" hidden title="Sign out of this browser">Sign out</button>
+  </span>
+</div>
+
 <div id="bar" hidden>
   <button id="fit">Fit</button>
   <button id="undo">Undo</button>
   <button id="clear">Clear</button>
   <button class="who" id="look" title="Light or dark, and which colours">Muwuyu</button>
-  <button class="who" id="who">You: <b>—</b></button>
   <button class="who" id="roots">Roots</button>
   <button class="who" id="aside" hidden></button>
   <button class="who" id="families" hidden>Other families</button>
-  <button class="who" id="family" hidden>This family</button>
   <button class="who" id="totems" hidden>Mitupo</button>
   <button class="who" id="kin">Kinship</button>
   <button class="dupes" id="dupes" hidden></button>
@@ -937,6 +996,11 @@ body{
 const KEY = 'muti-baobab-v1';
 
 const POD_W = 132, POD_H = 48;
+/* How much of the top of the screen the banner occupies. Everything that
+   places something on screen — fitting the tree, laying out the buds, nudging
+   a selected person into view — has to know, or the first row of a family
+   ends up underneath the bar naming it. */
+const TOPBAR = 58;
 const COUPLE_GAP = 30;     // between two partners
 const SIB_GAP = 46;        // between sibling families
 const LEVEL = 172;         // between generations
@@ -2618,7 +2682,7 @@ function mergePeople(keeperId, loserId){
   if (!keeper || !loser || keeperId === loserId) return;
   snapshot();
 
-  for (const f of ['sex', 'totem', 'born', 'died']){
+  for (const f of ['sex', 'totem', 'born', 'died', 'also']){
     if (!keeper[f] && loser[f]) keeper[f] = loser[f];
   }
   if (loser.root) keeper.root = true;
@@ -3071,6 +3135,9 @@ function render(){
   // way back to their records, and hiding it would make a reversible act
   // unreversible.
   $('bar').hidden = !people().length && !asidePeople().length;
+  // The banner appears with the toolbar: before there is anybody in the tree
+  // there is no family to name and nobody to be.
+  $('top').hidden = $('bar').hidden;
   // An empty tree is not the same as a tree everyone has been set aside from.
   // The welcome screen sits above everything, so showing it in the second case
   // would cover the one panel that can bring those records back — turning a
@@ -3149,9 +3216,10 @@ function placeBuds(){
   const RX = halfW + 96, RY = halfH + 60;
   const BW = 84, BH = 20;                     // half-extents of a bud
   const PAD = 10, BAR = innerHeight - 70;     // stay on screen, clear of the toolbar
+  const TOP = PAD + TOPBAR;                   // and out from under the banner
   const boxOf = (x, y) => ({ l:x - BW, r:x + BW, t:y - BH, b:y + BH });
   const onScreen = (x, y) =>
-    x - BW >= PAD && x + BW <= innerWidth - PAD && y - BH >= PAD && y + BH <= BAR;
+    x - BW >= PAD && x + BW <= innerWidth - PAD && y - BH >= TOP && y + BH <= BAR;
   const overlaps = (k, list) => list.some(q => k.l < q.r && q.l < k.r && k.t < q.b && q.t < k.b);
   const RING = [0, -40, 40, -75, 75, -110, 110, -145, 145, 180, -90, 90];
 
@@ -3182,7 +3250,7 @@ function placeBuds(){
   // Nearest point on a coarse grid that no other bud has taken.
   const sweep = () => {
     let best = null, nearest = Infinity;
-    for (let y = PAD + BH; y <= BAR - BH; y += 34){
+    for (let y = TOP + BH; y <= BAR - BH; y += 34){
       for (let x = PAD + BW; x <= innerWidth - PAD - BW; x += 44){
         if (overlaps(boxOf(x, y), placed)) continue;
         const d = (x - cx) ** 2 + (y - cy) ** 2;
@@ -3190,7 +3258,7 @@ function placeBuds(){
       }
     }
     return best || [Math.min(Math.max(cx, PAD + BW), innerWidth - PAD - BW),
-                    Math.min(Math.max(cy - RY, PAD + BH), BAR - BH)];
+                    Math.min(Math.max(cy - RY, TOP + BH), BAR - BH)];
   };
 
   const pu = parentUnionOf(id);
@@ -5282,6 +5350,16 @@ function openCard(id){
         `<span>${i ? 'and also — ' : ''}${esc(t.why)}</span></p>`).join('');
     })() : '') +
     `<input id="cName" class="fld" value="${esc(p.name)}" placeholder="Name" autocomplete="off">` +
+    /* THE OTHER NAME. One field, not a maiden/married pair — that pair decides
+       which of the two is the real one, and different families answer that
+       differently. This is whatever else somebody answers to: the name they
+       married into, a church name, an English name taken at school.
+
+       Most people need nothing here. The app already finds a woman by the
+       surname of the man she married without being told; this is for the ones
+       that guess cannot reach. */
+    `<input id="cAlso" class="fld" value="${esc(p.also || '')}" ` +
+      `placeholder="Also known as — a married name, a church name" autocomplete="off">` +
     `<div class="seg" id="cSex">` +
       `<button type="button" data-sex="f" aria-pressed="${p.sex === 'f'}">She</button>` +
       `<button type="button" data-sex="m" aria-pressed="${p.sex === 'm'}">He</button>` +
@@ -5315,6 +5393,7 @@ function openCard(id){
   const commit = () => {
     snapshot();
     p.name  = $('cName').value.trim() || p.name;
+    p.also  = $('cAlso').value.trim();
     p.sex   = document.querySelector('#cSex button[aria-pressed="true"]').dataset.sex;
     p.born  = $('cBorn').value.trim();
     p.died  = $('cDied').value.trim();
@@ -5567,13 +5646,14 @@ function revealBuds(){
   }), { left:Infinity, right:-Infinity, top:Infinity, bottom:-Infinity });
 
   const pad = 14, barTop = innerHeight - 74;    // keep clear of the toolbar
+  const top = pad + TOPBAR;                    // and of the banner
   let dx = 0, dy = 0;
   if (box.right - box.left < innerWidth - pad * 2){
     if (box.left < pad) dx = pad - box.left;
     else if (box.right > innerWidth - pad) dx = innerWidth - pad - box.right;
   }
-  if (box.bottom - box.top < barTop - pad){
-    if (box.top < pad) dy = pad - box.top;
+  if (box.bottom - box.top < barTop - top){
+    if (box.top < top) dy = top - box.top;
     else if (box.bottom > barTop) dy = barTop - box.bottom;
   }
   if (dx || dy){ pos.x += dx; pos.y += dy; applyTransform(); }
@@ -5848,13 +5928,29 @@ function askWhoIsViewing(roster, saying){
     el.id = 'form';
     el.className = 'wide';
 
+    /* MATCHED ON EVERY NAME SOMEBODY ANSWERS TO, not only the one on the
+       record. The server sends the others with the roster — see the comment
+       in routes/tree.js — so a woman recorded under her own house's surname
+       finds herself by the name she has actually been called since the
+       wedding, and the row says which name it matched so the match does not
+       look like a mistake. */
     const listOf = q => {
-      const hits = roster
-        .filter(p => !q || p.name.toLowerCase().includes(q.toLowerCase()))
-        .slice(0, 8);
+      const needle = q.toLowerCase();
+      const hits = roster.filter(p => {
+        if (!needle) return true;
+        if (p.name.toLowerCase().includes(needle)) return true;
+        return (p.also || []).some(a => a.toLowerCase().includes(needle));
+      }).slice(0, 8);
       return hits.length
-        ? hits.map(p => `<button type="button" data-who="${esc(p.id)}">${esc(p.name)}</button>`).join('')
-        : `<p class="covnote">Nobody of that name is in this family yet.</p>`;
+        ? hits.map(p => {
+            const matched = needle && !p.name.toLowerCase().includes(needle)
+              ? (p.also || []).find(a => a.toLowerCase().includes(needle)) : null;
+            return `<button type="button" data-who="${esc(p.id)}">${esc(p.name)}` +
+              (matched ? `<small>also ${esc(matched)}</small>` : '') + `</button>`;
+          }).join('')
+        : `<p class="covnote">Nobody of that name is in this family yet. Try ` +
+          `the name you were born with, or the one you married into — this ` +
+          `looks for both.</p>`;
     };
 
     el.innerHTML =
@@ -6005,8 +6101,18 @@ function updateWho(){
   const mine = $('family');
   if (mine){
     mine.hidden = store !== 'shared';
+    // WHICH FAMILY, decided by the session and nothing else. A passcode opens
+    // one family; this says which one it opened.
     mine.textContent = familyName || 'This family';
+    mine.title = familyName
+      ? `${familyName} — the family this passcode opened. Invitations, the ` +
+        `passcode, and signing out are in here.`
+      : 'This family';
   }
+  // Only where there is a session to end. On a browser holding its own copy
+  // there is nothing to sign out of.
+  const out = $('signout');
+  if (out) out.hidden = store !== 'shared';
   const tot = $('totems');
   if (tot) tot.hidden = !people().some(p => p.totem);
   const btn = $('who');
@@ -6197,10 +6303,13 @@ function fit(){
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const minX = Math.min(...xs) - POD_W, maxX = Math.max(...xs) + POD_W;
   const minY = Math.min(...ys) - POD_H*1.8, maxY = Math.max(...ys) + POD_H*1.8;
-  pos.k = Math.max(0.5, Math.min(1.15, Math.min((innerWidth - 80) / (maxX - minX || 1),
-                                                (innerHeight - 170) / (maxY - minY || 1))));
-  pos.x = innerWidth/2  - ((minX + maxX)/2) * pos.k;
-  pos.y = innerHeight/2 - ((minY + maxY)/2) * pos.k;
+  pos.k = Math.max(0.5, Math.min(1.15,
+    Math.min((innerWidth - 80) / (maxX - minX || 1),
+             (innerHeight - 170 - TOPBAR) / (maxY - minY || 1))));
+  pos.x = innerWidth/2 - ((minX + maxX)/2) * pos.k;
+  // Centred in what is left between the banner and the toolbar, not in the
+  // window — the window includes two bars the tree cannot be drawn under.
+  pos.y = (innerHeight + TOPBAR)/2 - ((minY + maxY)/2) * pos.k;
   applyTransform();
 }
 
@@ -6215,6 +6324,25 @@ $('who').onclick = () => {
   pickingMe = !pickingMe;
   updateWho();
   say(pickingMe ? 'Tap your own name in the tree.' : '');
+};
+
+/* SIGNING OUT, where somebody would look for it.
+
+   The same act the family panel has always offered, lifted to where it can be
+   found: a session that can be started from the front door and only ended
+   from three taps inside a panel about invitations is a door that only opens.
+
+   It ends this browser's session and nothing else — the family's passcode is
+   untouched, everybody else stays signed in, and not one record is altered.
+   The confirm says so, because "sign out" reads to some people like "delete my
+   account" and this is the moment to be plain about which it is. */
+$('signout').onclick = async () => {
+  if (!confirm('Sign out of this browser?\n\n' +
+               'You will need the family passcode, or an invitation, to get ' +
+               'back in. Nothing in the tree is changed and nobody else is ' +
+               'signed out.')) return;
+  try { await fetch('/api/sign-out', { method:'POST' }); } catch (e) {}
+  location.href = '/gate';
 };
 
 $('dupes').onclick = openDuplicates;
@@ -6504,7 +6632,8 @@ function adopt(tree){
                  notDuplicates:[], lexicon:tree.lexicon || {} };
   for (const p of tree.people){
     next.people[p.id] = {
-      id:p.id, name:p.name, sex:p.sex || '', totem:p.totem || '',
+      id:p.id, name:p.name, also:p.also_known_as || '',
+      sex:p.sex || '', totem:p.totem || '',
       born:p.born || '', died:p.died || '', root:!!p.is_root,
       by:p.added_by || '', at:p.created_at, v:p.updated_at
     };
@@ -6559,6 +6688,7 @@ function diffOps(was, now){
     if (!b){
       refOf[id] = '$' + id;
       ops.push({ op:'addPerson', ref:refOf[id], name:p.name, sex:p.sex,
+                 alsoKnownAs:p.also || '',
                  totem:p.totem, born:p.born, died:p.died, addedBy:p.by || '' });
       if (p.root) ops.push({ op:'setRoot', personId:refOf[id], root:true });
       continue;
@@ -6567,6 +6697,9 @@ function diffOps(was, now){
     for (const f of ['name', 'sex', 'totem', 'born', 'died']){
       if ((p[f] || '') !== (b[f] || '')) fields[f] = p[f] || '';
     }
+    // The op's name for it is alsoKnownAs; the client calls it `also` because
+    // it sits beside `name` on a card and a card is not a schema.
+    if ((p.also || '') !== (b.also || '')) fields.alsoKnownAs = p.also || '';
     if (Object.keys(fields).length){
       // `expect` is the whole of the concurrency guarantee: the server
       // refuses this rather than applying it if somebody else has touched

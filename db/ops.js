@@ -160,16 +160,17 @@ function makeResolver(refs) {
 
 // ---------------------------------------------------------------------------
 
-const PERSON_FIELDS = ['name', 'sex', 'totem', 'born', 'died', 'added_by'];
+const PERSON_FIELDS = ['name', 'also_known_as', 'sex', 'totem', 'born', 'died', 'added_by'];
 
 const HANDLERS = {
   async addPerson(ctx, op) {
     const { client, treeId, actor } = ctx;
     const { rows } = await client.query(
-      `INSERT INTO people (tree_id, name, sex, totem, born, died, added_by, legacy_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [treeId, op.name ?? '', op.sex ?? '', op.totem ?? '', op.born ?? '',
-       op.died ?? '', op.addedBy ?? actor ?? '', op.legacyId ?? null]
+      `INSERT INTO people (tree_id, name, also_known_as, sex, totem, born, died,
+                           added_by, legacy_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [treeId, op.name ?? '', op.alsoKnownAs ?? '', op.sex ?? '', op.totem ?? '',
+       op.born ?? '', op.died ?? '', op.addedBy ?? actor ?? '', op.legacyId ?? null]
     );
     const person = rows[0];
     if (op.ref) ctx.refs.set(op.ref, person.id);
@@ -184,7 +185,8 @@ const HANDLERS = {
 
     const sets = [], vals = [];
     for (const f of PERSON_FIELDS) {
-      const key = f === 'added_by' ? 'addedBy' : f;
+      const key = f === 'added_by' ? 'addedBy'
+                : f === 'also_known_as' ? 'alsoKnownAs' : f;
       if (op[key] !== undefined) { vals.push(op[key]); sets.push(`${f} = $${vals.length}`); }
     }
     if (!sets.length) return { id };

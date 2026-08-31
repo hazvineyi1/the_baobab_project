@@ -105,16 +105,63 @@ module.exports = function treeRoutes(pool, homeTreeId = null) {
     if (!s || s.scope !== 'family') return next();
     if (s.personId) return next();
     try {
+      /* NAMES ONLY, and every name somebody might answer to.
+
+         BE SENSITIVE TO MARRIED NAMES. This family records women under their
+         own house's surname, which is right — a woman keeps her mutupo after
+         marrying, so Evelyn Mandaba stays a Mandaba in a tree full of Musonis.
+         But she has been Mai Musoni for thirty years, and Musoni is what she
+         will type when a screen asks who she is. A roster that only knows the
+         name on the record answers "you are not in this family" to somebody
+         standing in the middle of it.
+
+         So the answer carries the other names too: the one recorded on her
+         card if anybody filled it in, AND — needing nothing filled in at all —
+         her own first name with her husband's surname, worked out from the
+         marriage that is already in the tree. That second one is the whole of
+         the automation: nobody has to have thought of this in advance for it
+         to work for them.
+
+         Still names and nothing else. A partner's surname is a name; who is
+         married to whom stays behind the answer, along with the dates, the
+         mitupo and the rest of the family. */
       const { rows } = await pool.query(
-        `SELECT id, name FROM people
-          WHERE tree_id = $1 AND aside_at IS NULL
-          ORDER BY name LIMIT 2000`, [s.treeId]);
+        `SELECT p.id, p.name, p.also_known_as,
+                COALESCE(array_agg(q.name) FILTER (WHERE q.id IS NOT NULL), '{}')
+                  AS partner_names
+           FROM people p
+           LEFT JOIN union_partners up  ON up.person_id = p.id
+           LEFT JOIN union_partners up2 ON up2.union_id = up.union_id
+                                       AND up2.person_id <> p.id
+           LEFT JOIN people q ON q.id = up2.person_id AND q.aside_at IS NULL
+          WHERE p.tree_id = $1 AND p.aside_at IS NULL
+          GROUP BY p.id, p.name, p.also_known_as
+          ORDER BY p.name LIMIT 2000`, [s.treeId]);
       if (!rows.length) return next();
+
+      const surname = n => String(n || '').trim().split(/\s+/).pop() || '';
+      const first   = n => String(n || '').trim().split(/\s+/)[0] || '';
+      const people = rows.map(r => {
+        const also = new Set();
+        if (r.also_known_as) also.add(r.also_known_as.trim());
+        const mine = surname(r.name).toLowerCase();
+        for (const partner of r.partner_names || []) {
+          const theirs = surname(partner);
+          // Only where it would actually be a different name. A woman who
+          // married a man of her own surname is not also known as herself.
+          if (theirs && theirs.toLowerCase() !== mine && first(r.name)) {
+            also.add(`${first(r.name)} ${theirs}`);
+          }
+        }
+        return { id: r.id, name: r.name,
+                 ...(also.size ? { also: [...also] } : {}) };
+      });
+
       return res.status(428).json({
         error: 'who_are_you',
         message: 'Say who you are in this family. Every word this tree uses is ' +
                  'reckoned from one person, so it has to know which one you are.',
-        people: rows
+        people
       });
     } catch (e) { return sendError(res, e); }
   }

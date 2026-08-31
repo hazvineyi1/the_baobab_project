@@ -180,8 +180,15 @@ function client(server) {
   eq('and it says which question is being asked', r.body.error, 'who_are_you');
   check('with the names to answer it from', Array.isArray(r.body.people) &&
         r.body.people.some(p => /Chenjerai/.test(p.name)), r.text.slice(0, 200));
+  /* NAMES ONLY — but every name somebody might answer to. `also` carries the
+     other names: one recorded on the card, and the person's own first name
+     with a spouse's surname, so a woman kept under her own house's name is
+     findable by the one she married into. A partner's surname is a name; who
+     is married to whom stays behind the answer, with the dates and the
+     mitupo. */
   check('and nothing else about them — no dates, no totem, no marriages',
-        Object.keys(r.body.people[0]).sort().join(',') === 'id,name',
+        r.body.people.every(p =>
+          Object.keys(p).every(k => k === 'id' || k === 'name' || k === 'also')),
         Object.keys(r.body.people[0]).join(','));
 
   const chenjerai = r.body.people.find(p => /Chenjerai/.test(p.name));

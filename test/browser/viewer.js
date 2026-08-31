@@ -59,12 +59,17 @@ const section = t => console.log('\n' + t);
 
   section('the founder puts the family in, themselves included');
   await first.page.evaluate(t => {
-    const dad = addPerson('Sydney ' + t, 'm', 'Mwendamberi', '1940', '2013');
+    // Real surnames, because the married-name test below turns on them: the
+    // tag sits in the middle so every name is still unique to this run.
+    const dad = addPerson('Sydney ' + t + ' Musoni', 'm', 'Mwendamberi', '1940', '2013');
     state.rootId = dad;
-    const mum = grow('partner', dad, 'Evelyn ' + t, 'f', 'Moyondizvo', { born:'1954' });
-    grow('child', dad, 'Ida ' + t,       'f', 'Mwendamberi', { born:'1972' });
-    grow('child', dad, 'Bertha ' + t,    'f', 'Mwendamberi', { born:'1975' });
-    grow('child', dad, 'Hazvineyi ' + t, 'f', 'Mwendamberi', { born:'1979' });
+    // Recorded under her OWN house's name, which is right — she keeps her
+    // mutupo after marrying — and is exactly why she cannot be found by the
+    // name everybody has called her since the wedding.
+    const mum = grow('partner', dad, 'Evelyn ' + t + ' Mandaba', 'f', 'Moyondizvo', { born:'1954' });
+    grow('child', dad, 'Ida ' + t + ' Musoni',       'f', 'Mwendamberi', { born:'1972' });
+    grow('child', dad, 'Bertha ' + t + ' Musoni',    'f', 'Mwendamberi', { born:'1975' });
+    grow('child', dad, 'Hazvineyi ' + t + ' Musoni', 'f', 'Mwendamberi', { born:'1979' });
     save();
   }, TAG);
   await saved(first.page);
@@ -182,6 +187,54 @@ const section = t => console.log('\n' + t);
   const blanks = Object.values(back).filter(v => v === '').length;
   is(blanks >= 0, true, `${blanks} card(s) carry no word, and say nothing`);
 
+  // ── married names ────────────────────────────────────────────────────────
+  section('SHE CAN BE FOUND BY THE NAME SHE MARRIED INTO');
+  /* Recorded as Evelyn Mandaba, married to a Musoni, and Musoni is what she
+     will type when a screen asks who she is. Nobody filled anything in for
+     this to work — it is read off the marriage already in the tree. */
+  const guest2 = await browser.newContext({ viewport:{ width:1180, height:900 } });
+  await guest2.route('**', r => r.request().url().startsWith(BASE) ? r.continue() : r.abort());
+  const her = await guest2.newPage();
+  await her.goto(BASE, { waitUntil:'domcontentloaded' });
+  await her.fill('input[name="passphrase"]', made.passcode);
+  await Promise.all([
+    her.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    her.click('button[type="submit"]')
+  ]);
+  await her.waitForSelector('#whoQ', { timeout: 15000 });
+  await her.fill('#whoQ', 'Musoni');
+  await her.waitForTimeout(300);
+  const found = await her.$$eval('#whoList [data-who]', bs => bs.map(b => b.textContent.trim()));
+  is(found.some(n => /Evelyn/.test(n) && /Mandaba/.test(n)), true,
+     'typing her married surname finds her: ' + found.join(' | '));
+  is(found.some(n => /also Evelyn Musoni/.test(n)), true,
+     'and the row says which name it matched, so it does not look like a slip: ' +
+     found.join(' | '));
+
+  section('and her own name still finds her, which is the one on her card');
+  await her.fill('#whoQ', 'Mandaba');
+  await her.waitForTimeout(300);
+  is((await her.$$eval('#whoList [data-who]', bs => bs.map(b => b.textContent.trim())))
+       .some(n => /Evelyn/.test(n)), true, 'found under her own house');
+  await guest2.close();
+
+  // ── the banner ───────────────────────────────────────────────────────────
+  section('THE BANNER SAYS WHERE YOU ARE AND WHO YOU ARE');
+  is(await page.$eval('#top .brand', el => el.textContent.trim()),
+     'The Muwuyu Project', 'the project names itself');
+  is(await page.$eval('#top #family', el => el.textContent.trim()),
+     'The ' + TAG + ' family', 'the family this passcode opened');
+  is(/Bertha/.test(await page.$eval('#top #who', el => el.textContent)), true,
+     'and who the words are reckoned from');
+  is(await page.$eval('#top #signout', el => el.hidden), false,
+     'with a way out that does not have to be gone looking for');
+
+  section('and the family it names comes from the SESSION, not from the link');
+  // Same browser, no link, no storage — the passcode decided which family this
+  // is and the banner reports that and nothing else.
+  is(await page.evaluate(() => familyName), 'The ' + TAG + ' family',
+     'the family is the one the session is in');
+
   // ── an invitation that names who it is for ───────────────────────────────
   section('AN INVITATION MADE FOR A NAMED RELATIVE OPENS AS THEM');
   // The only thing here that makes who-is-viewing somebody else's word rather
@@ -238,6 +291,24 @@ const section = t => console.log('\n' + t);
      'and the button says it is settled rather than pretending it can change');
   const told = await guest.textContent('#live');
   is(/link was made for/.test(told), true, 'saying why: ' + told);
+
+  section('SIGNING OUT ENDS THIS BROWSER AND NOTHING ELSE');
+  page.on('dialog', d => d.accept());
+  await Promise.all([
+    page.waitForNavigation({ waitUntil:'domcontentloaded' }).catch(() => {}),
+    page.click('#top #signout')
+  ]);
+  await page.waitForTimeout(600);
+  is(!!(await page.$('input[name="passphrase"]')), true,
+     'back at the door: ' + page.url());
+
+  section('and the family is untouched — somebody else is still inside');
+  // The guest came in on an invitation and is still signed in. Signing out is
+  // one browser leaving, not the family closing.
+  await guest.reload({ waitUntil:'domcontentloaded' });
+  await ready(guest);
+  is(await guest.evaluate(() => people().length), 5,
+     'their session still opens the whole family');
 
   await guestCtx.close();
   await ctx.close();
