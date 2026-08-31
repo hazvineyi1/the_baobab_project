@@ -318,12 +318,19 @@ body{
 :root[data-theme="dark"] #bgTree{opacity:.26;}
 :root[data-theme="dark"] .bg-grain{stroke:var(--bark-lit); opacity:.22;}
 
-#canvas{position:absolute; inset:0; overflow:visible;}
-#pods{position:absolute; inset:0;}
+#canvas{position:absolute; inset:0; overflow:visible; pointer-events:none;}
+#canvas .hit{pointer-events:stroke;}
+/* The pods layer covers the whole viewport, so left as it was it swallowed
+   every click meant for the lines underneath it. Only the pods themselves take
+   a pointer now — the same arrangement #buds has always had, and for the same
+   reason. Empty space between pods was never doing anything with a click
+   anyway; it can pass it down. */
+#pods{position:absolute; inset:0; pointer-events:none;}
+#pods .pod{pointer-events:auto;}
 /* Buds live in screen space, not in the tree's, so they stay a constant,
    finger-sized distance from a person however far you have zoomed out. */
 #buds{position:absolute; inset:0; pointer-events:none;}
-#buds .bud, #buds .term{pointer-events:auto;}
+#buds .bud{pointer-events:auto;}
 .layer{position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform;}
 
 /* ── branches ───────────────────────────────────────────────────────── */
@@ -332,6 +339,10 @@ body{
 .branch.unknown{stroke:var(--muted); stroke-width:2; stroke-dasharray:4 6; opacity:.6;}
 .bond{stroke:var(--bark-thin); stroke-width:3; stroke-linecap:round; fill:none;}
 .bond.reach{stroke-dasharray:none; opacity:.7;}   /* a partner further along the row */
+/* The tap target over a line. Invisible, and the only thing in the tree layer
+   that takes a pointer at all — everything else there is drawing. */
+.hit{fill:none; stroke:transparent; stroke-linecap:round; pointer-events:stroke;
+     cursor:pointer;}
 .grow{stroke-dasharray:1400; stroke-dashoffset:1400; animation:draw .55s ease-out forwards;}
 @keyframes draw{to{stroke-dashoffset:0;}}
 
@@ -402,7 +413,12 @@ body{
   font-variant-numeric:tabular-nums;
 }
 /* whoever is holding the phone */
-.pod.you{border-color:var(--leaf); box-shadow:0 0 0 3px color-mix(in srgb, var(--leaf) 22%, transparent);}
+/* YOU. Every term on the canvas is measured from this one person, so which
+   pod it is should never be in question — a ring you can find at a glance
+   from across the tree, not a border you have to go looking for. */
+.pod.you{border-color:var(--leaf); border-width:2.5px;
+         box-shadow:0 0 0 5px color-mix(in srgb, var(--leaf) 26%, transparent),
+                    var(--lift);}
 .pod.you .badge{
   position:absolute; top:-10px; left:50%; transform:translateX(-50%);
   padding:2px 9px; border-radius:999px; background:var(--leaf); color:var(--sky);
@@ -436,21 +452,18 @@ body{
 .bud i{font-style:normal; font-size:13px; line-height:1;}
 @keyframes bud{from{opacity:0; transform:translate(-50%,-50%) scale(.4);}}
 
-/* what this person is to you, in the family's own words */
-.term{
-  position:absolute; transform:translate(-50%,-50%);
-  max-width:230px; padding:8px 14px; border-radius:16px 5px 16px 5px;
-  background:var(--leaf); color:var(--sky); box-shadow:var(--lift);
-  text-align:center; pointer-events:auto; cursor:pointer;
-  animation:bud .24s ease-out backwards;
-}
-.term b{
-  display:block; font-family:'Fraunces',Georgia,serif;
-  font-size:17px; font-weight:600; letter-spacing:.01em;
-}
-.term span{display:block; font-size:10.5px; line-height:1.4; opacity:.85; margin-top:2px;}
-.term.none{background:var(--pod); color:var(--muted); border:1.5px dashed var(--pod-edge);}
-.term.none b{color:var(--ink); font-size:13px;}
+/* THE RIBBON THAT USED TO BE HERE is gone, and its going is the point of
+   this change. It appeared beside whoever was selected, unasked, and said one
+   thing only: what that person is to YOU. On a tree of any size that is a
+   panel of prose floating over the branches every time a finger lands
+   anywhere — reported, exactly, as "this is too much content and becomes
+   crowded".
+
+   Nothing it said has been lost. The card behind the ⋯ on a selected person
+   still says what they are to you, at more length and with the gaps it would
+   take to name them. And tapping the LINE between any two people now says
+   what those two are to each other, which the ribbon could never do at all.
+   The difference is that both are asked for. */
 
 /* ── the grow form ──────────────────────────────────────────────────── */
 #form{
@@ -527,10 +540,6 @@ body{
   margin:-4px 0 12px; padding:8px 11px; border-radius:10px;
   background:var(--pod-hi); border:1px solid var(--pod-edge);
   font-size:11px; line-height:1.5; color:var(--muted);
-}
-.term b em{
-  font-style:normal; font-size:10px; font-weight:700; vertical-align:super;
-  margin-left:3px; opacity:.75;
 }
 #form .teach{
   margin:-4px 0 10px; padding:10px 11px; border-radius:0 0 12px 12px;
@@ -798,7 +807,6 @@ body{
 }
 @media (max-width:600px){
   #hint{display:none;}
-  .term{max-width:200px;}
   #bar button{padding:7px 10px; font-size:12px;}
 }
 </style>
@@ -2555,7 +2563,10 @@ function computeLayout(){
         y: b.y
       };
       if (u.partners.length === 2){
-        links.push({ kind:'bond', x1:Math.min(...xs), x2:Math.max(...xs), y:b.y, reach:gap > 1 });
+        // The two people it ties, so a tap on the line can say what they are
+        // to each other.
+        links.push({ kind:'bond', x1:Math.min(...xs), x2:Math.max(...xs), y:b.y,
+                     reach:gap > 1, pair:[u.partners[0], u.partners[1]] });
       }
     }
   }
@@ -2564,10 +2575,16 @@ function computeLayout(){
     const to = persons[b.viaChild];
     if (!to) continue;
     const from = (b.viaUnion && unionAt[b.viaUnion]) || { x:b.parent.x, y:b.parent.y };
+    /* A branch joins a CHILD to a MARRIAGE, so the pair a tap resolves to is
+       the child and each partner in it — one line, one or two answers. */
+    const parents = (b.viaUnion && state.unions[b.viaUnion])
+      ? state.unions[b.viaUnion].partners.filter(present)
+      : [];
     links.push({
       kind:'branch', x1:from.x, y1:from.y, x2:to.x, y2:to.y,
       weight:countBelow(b), root:(from.y + to.y)/2 > 0,
-      unknown:!!b.parent.socket, id:b.viaChild
+      unknown:!!b.parent.socket, id:b.viaChild,
+      child:b.viaChild, parents
     });
   }
   layout = { persons, sockets, links };
@@ -2582,11 +2599,30 @@ function branchPath(l){
   return `M${l.x1} ${l.y1} C ${l.x1 + dx*0.05} ${l.y1 + s*c}, ${l.x2 - dx*0.05} ${l.y2 - s*c}, ${l.x2} ${l.y2}`;
 }
 
+/* An invisible stroke over a drawn line, wide enough to be tapped.
+
+   A bond between two partners is three pixels of ink and nobody can hit three
+   pixels with a thumb. The line itself keeps its own width — this is only for
+   the pointer, which is why it is drawn separately rather than by fattening
+   what people see. */
+function hitPath(d, drawn, from, others){
+  const w = Math.max(24, Number(drawn) || 0);
+  return `<path class="hit" d="${d}" stroke-width="${w}"` +
+         ` data-from="${from}" data-to="${others.join(',')}"></path>`;
+}
+
 function render(){
   ancestryCache.clear();          // the tree may have changed shape
   computeLayout();
 
   const svg = [];
+  /* The tappable copies of the lines are collected apart from the ink and
+     appended after it, bonds LAST. Where a child's stem leaves its parents'
+     bond the two lines genuinely cross, and whichever is painted later takes
+     the tap. A branch runs a whole row's height and can be tapped anywhere
+     along it; a bond is only as long as the gap between two pods. So the bond
+     wins the overlap, and neither line loses anything worth having. */
+  const hits = [], bondHits = [];
   for (const l of layout.links){
     if (l.kind === 'bond'){
       // Two partners standing next to each other get a short straight tie.
@@ -2596,6 +2632,7 @@ function render(){
         ? `M${l.x1} ${l.y}q${(l.x2 - l.x1)/2} ${POD_H/2 + 26} ${l.x2 - l.x1} 0`
         : `M${l.x1} ${l.y}L${l.x2} ${l.y}`;
       svg.push(`<path class="bond${l.reach ? ' reach' : ''}" d="${d}"></path>`);
+      if (l.pair) bondHits.push(hitPath(d, 3, l.pair[0], [l.pair[1]]));
       continue;
     }
     if (l.unknown){
@@ -2610,8 +2647,11 @@ function render(){
       : Math.max(3.5, Math.min(38, 3.5 + Math.sqrt(l.weight) * 3.8))) * flare;
     svg.push(`<path class="branch${l.root ? ' root' : ''}${fresh.has(l.id) ? ' grow' : ''}"` +
              ` stroke-width="${w.toFixed(1)}" d="${branchPath(l)}"></path>`);
+    if (l.child && l.parents && l.parents.length){
+      hits.push(hitPath(branchPath(l), w, l.child, l.parents));
+    }
   }
-  gtree.innerHTML = svg.join('');
+  gtree.innerHTML = svg.concat(hits, bondHits).join('');
 
   const html = [];
   for (const s of layout.sockets){
@@ -2717,9 +2757,14 @@ function placeBuds(){
   const halfW = (POD_W / 2) * pos.k, halfH = (POD_H / 2) * pos.k;
   // Covering a person is bad; covering another bud is fatal, because the
   // hidden one looks like an option that simply isn't offered.
-  const pods = Object.values(layout.persons).map(q => ({
+  /* A badge — "You", "Root of the line" — hangs ABOVE the pod, outside the
+     rectangle the pod itself occupies. Left out of the reckoning, a bud sits
+     straight on top of it, and the one mark saying which person every term on
+     this canvas is measured from is the thing that gets covered. */
+  const badged = pid => pid === meId || !!(state.people[pid] && state.people[pid].root);
+  const pods = Object.entries(layout.persons).map(([pid, q]) => ({
     l:sx(q) - halfW - 6, r:sx(q) + halfW + 6,
-    t:sy(q) - halfH - 14, b:sy(q) + halfH + 14
+    t:sy(q) - halfH - 14 - (badged(pid) ? 24 * pos.k : 0), b:sy(q) + halfH + 14
   })).concat((layout.sockets || []).map(q => ({
     l:sx(q) - 58 * pos.k, r:sx(q) + 58 * pos.k,
     t:sy(q) - 22 * pos.k, b:sy(q) + 22 * pos.k
@@ -2773,9 +2818,6 @@ function placeBuds(){
                     Math.min(Math.max(cy - RY, PAD + BH), BAR - BH)];
   };
 
-  const ribbon = ribbonSpot(cx, cy);
-  if (ribbon) placed.push({ l:ribbon[0] - 134, r:ribbon[0] + 134, t:ribbon[1] - 48, b:ribbon[1] + 48 });
-
   const pu = parentUnionOf(id);
   const isRoot = !!(state.people[id] && state.people[id].root);
   const canParent = !isRoot && (!pu || pu.partners.length < 2);
@@ -2808,28 +2850,13 @@ function placeBuds(){
       layer.children[i].style.left = o.at[0].toFixed(1) + 'px';
       layer.children[i].style.top  = o.at[1].toFixed(1) + 'px';
     });
-    const el = layer.querySelector('.term');
-    if (el && ribbon){
-      el.style.left = ribbon[0].toFixed(1) + 'px';
-      el.style.top  = ribbon[1].toFixed(1) + 'px';
-    }
     return;
   }
   budSig = sig;
   layer.innerHTML = out.map(o =>
     `<div class="bud" data-bud="${o.kind}" data-anchor="${id}" tabindex="0" role="button"` +
     ` style="left:${o.at[0].toFixed(1)}px; top:${o.at[1].toFixed(1)}px">` +
-    `<i>${o.icon}</i>${o.label}</div>`).join('') + relationRibbon(ribbon);
-}
-
-/* Where the ribbon sits, or null when there is nothing to say — just below
-   the person, pulled inside the edges of the screen. */
-function ribbonSpot(cx, cy){
-  if (!meId || !sel || sel === meId || !state.people[meId] || !state.people[sel]) return null;
-  return [
-    Math.min(Math.max(cx, 132), innerWidth - 132),
-    Math.min(cy + (POD_H / 2) * pos.k + 52, innerHeight - 96)
-  ];
+    `<i>${o.icon}</i>${o.label}</div>`).join('');
 }
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -4434,13 +4461,17 @@ function openKinship(){
            has been told. The app believes the years; this says where the row
            it is drawn in says otherwise, because only the family knows which
            of the two they meant. */
+        /* ONE example, not all of them. This listed every conflicting pair in
+           full and turned a summary into a paragraph — the panel is a count of
+           what is missing, and a count that takes four lines to say itself is
+           not a count. */
         gapRow(conflicts.length, 'the row and the birth years disagree',
                conflicts.length
-                 ? `${conflicts.slice(0, 3).map(c =>
-                     `${state.people[c.a].name.split(' ')[0]} (${c.ya}) is placed ` +
-                     `before ${state.people[c.b].name.split(' ')[0]} (${c.yb})`).join('; ')}` +
-                   `${conflicts.length > 3 ? ` and ${conflicts.length - 3} more` : ''}` +
-                   ' — the years are being believed'
+                 ? `${state.people[conflicts[0].a].name.split(' ')[0]} (${conflicts[0].ya}) ` +
+                   `sits before ${state.people[conflicts[0].b].name.split(' ')[0]} ` +
+                   `(${conflicts[0].yb})` +
+                   `${conflicts.length > 1 ? `, and ${conflicts.length - 1} more` : ''}` +
+                   ' — the years decide'
                  : '') +
         gapRow(cov.gaps.sex.length, 'the term depends on he or she',
                'record which, and the word follows') +
@@ -4518,6 +4549,85 @@ function openKinship(){
     forgetTerm(b.dataset.forget); render(); save(); openKinship();
   });
   $('kNo').onclick = closeForm;
+  el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
+}
+
+/* WHAT A LINE MEANS, when you tap one.
+
+   The relationship used to appear on its own, beside whoever was selected,
+   and always between YOU and them. Two things were wrong with that. It put a
+   ribbon on the canvas whether or not anybody had asked for one, which is
+   what made the screen crowded. And it could only ever answer one question —
+   what is this person to me — so a line between two OTHER people, a mother
+   and her son standing right there joined by it, had no way of being asked
+   about at all.
+
+   A line joins two people. Tapping it says what they are to each other, in
+   both directions, and stops there. Selecting a person now only selects
+   them. */
+function openLine(fromId, toIds){
+  closeForm();
+  const from = state.people[fromId];
+  if (!from) return;
+  const others = (toIds || []).filter(id => state.people[id]);
+  if (!others.length) return;
+  pending = { kind:'line', anchorId: fromId };
+
+  const nameOf = id => esc(state.people[id].name);
+  const firstOf = id => esc((state.people[id].name || '').split(' ')[0] || 'they');
+
+  /* The traces are written in the second person — "your mother's brother" —
+     because everywhere else the person doing the asking IS the person being
+     reckoned from. On a line between two OTHER people they are not, and left
+     alone the panel would tell Bertha that her own son is "your son" when the
+     son in question is not hers to whoever is reading. So the wording is
+     turned round to name whoever the reckoning starts from — by first name,
+     since the full one is already in the sentence above it and saying it
+     three times in two lines is how a panel stops being read. */
+  const facing = (text, a) => a === meId ? text
+    : text.replace(/\byour\b/g, firstOf(a) + "'s").replace(/\byou\b/g, firstOf(a));
+
+  /* A trace earns its place when it names a PATH — "Ida's mother's brother"
+     says something the word alone does not. A direct link does not: "Amai —
+     Victor's mother or father" is worse than "Amai" by itself, because the
+     term is the precise word and the trace is the vague one it was derived
+     from. So the ones that only restate the link are dropped. */
+  const RESTATES = /^((older |younger )?brother or sister|child|mother or father|husband or wife)$/;
+
+  const word = (a, b) => {
+    const k = kinTerms(a, b);
+    const t = k && k.list.length ? k.list[0] : null;
+    if (t){
+      const trace = facing(esc(t.why), a);
+      // Whose it is has already been said; what is left is the link itself.
+      // startsWith, not a regex — a name is not a pattern.
+      const own = a === meId ? 'your ' : firstOf(a) + "'s ";
+      const bare = trace.startsWith(own) ? trace.slice(own.length) : trace;
+      return `<p class="relline"><b>${esc(t.term)}</b><span>` +
+        `${nameOf(b)} is ${nameOf(a)}'s ${esc(t.term)}` +
+        `${RESTATES.test(bare) ? '' : ` — ${trace}`}</span></p>`;
+    }
+    const gap = whyNotNamed(a, b);
+    return `<p class="relline none"><b>Not named yet</b><span>` +
+      `${nameOf(b)} is ${nameOf(a)}'s relative` +
+      `${gap ? ` — ${esc(gap.text)}` : ''}</span></p>`;
+  };
+
+  const el = document.createElement('div');
+  el.id = 'form';
+  el.innerHTML =
+    `<p class="cap">Along this line</p>` +
+    others.map(o => word(o, fromId) + word(fromId, o)).join('') +
+    `<div class="row" style="margin-top:12px">` +
+      `<button class="btn ghost" id="lnMore">Ask about any two</button>` +
+      `<button class="btn ghost" id="lnNo">Close</button></div>`;
+  document.body.appendChild(el);
+  placeForm(el);
+  $('lnMore').onclick = () => {
+    kinA = others[0]; kinB = fromId;
+    openKinship();
+  };
+  $('lnNo').onclick = closeForm;
   el.addEventListener('keydown', e => { if (e.key === 'Escape'){ e.preventDefault(); closeForm(); } });
 }
 
@@ -5144,36 +5254,58 @@ function updateWho(){
                 : 'Say who you are, and every name will tell you what they are to you.';
 }
 
-/* The ribbon under whoever is selected: the Shona term, and the trace that
-   produced it, so it can be checked rather than taken on faith. */
-function relationRibbon(spot){
-  if (!spot) return '';
-  const k = kinTerms(meId, sel);
-  if (!k) return '';
-  const first = k.list[0];
-  // Several words at once is normal here, so the ribbon says how many rather
-  // than picking one and pretending it is the whole answer. Tapping opens the
-  // card, which lists them.
-  const extra = k.list.length - 1;
-  // With no word, the ribbon says what is missing rather than repeating the
-  // trace — and tapping it opens the record that would supply it, which is
-  // usually somebody else's card rather than the one being looked at.
-  const gap = first ? null : whyNotNamed(meId, sel);
-  const opens = gap && gap.fix ? gap.fix : sel;
-  return `<div class="term${first ? '' : ' none'}" data-card="${opens}" role="button" tabindex="0"` +
-    ` style="left:${spot[0].toFixed(1)}px; top:${spot[1].toFixed(1)}px">` +
-    `<b>${esc(first ? first.term : (k.base.choice || 'Not named yet'))}` +
-    `${extra > 0 ? `<em>+${extra}</em>` : ''}</b>` +
-    `<span>${esc(first ? first.why : (gap ? gap.text : k.base.why))}` +
-    `${extra > 0 ? ` · and ${extra} more` : ''}</span></div>`;
-}
-
 /* ── interaction ────────────────────────────────────────────────────── */
+
+/* A TAP ON A LINE, tracked from pointerdown to pointerup rather than waiting
+   for a click.
+
+   The tree layer takes no pointer events at all except these: everything else
+   in it is drawing, and a stray hit on a branch used to do nothing.
+
+   There is no click to wait for. A press on a line and the release after it
+   land on different elements — the tree layer redraws in between — and a
+   browser only raises a click when down and up share a target. So the press
+   is remembered, and the release decides: still on the same line, and the
+   finger barely moved, is a tap. Anything further is a pan, and a pan must
+   not open a panel.
+
+   The press is deliberately NOT stopped from propagating. The pods layer does
+   stop it, because a pod is a thing you grab; a line is a thing you draw
+   across, and the tree is mostly lines — swallowing the press would mean the
+   bigger the family, the less of the tree could be dragged, until a crowded
+   one could barely be moved at all. So the press starts a pan as usual, and
+   the slop check below is the only thing that tells the two apart. */
+const TAP_SLOP = 6;                    // pixels a finger may drift and still tap
+let lineTap = null;
+
+$('canvas').addEventListener('pointerdown', e => {
+  const hit = e.target.closest('.hit');
+  if (!hit) return;
+  lineTap = { from: hit.dataset.from, to: hit.dataset.to || '',
+              x: e.clientX, y: e.clientY };
+});
+
+/* The RELEASE is listened for on the window, not on the canvas.
+
+   Because the press is allowed through, it starts a pan — and the pan takes a
+   pointer capture on the stage, which RETARGETS every later event of that
+   press to the stage. The release therefore never reaches the line it began
+   on, and a listener sitting on the canvas would simply never hear it. That
+   costs nothing: the press already recorded which line it was, and all the
+   release has to say is where the finger ended up. Further than the slop and
+   it was a pan, which the stage has already done; within it, a tap. */
+addEventListener('pointerup', e => {
+  const tap = lineTap;
+  lineTap = null;
+  if (!tap) return;
+  if (Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > TAP_SLOP) return;
+  openLine(tap.from, tap.to.split(',').filter(Boolean));
+});
+addEventListener('pointercancel', () => { lineTap = null; });
+
 const budsEl = $('buds');
 budsEl.addEventListener('pointerdown', e => { if (e.target.closest('.bud')) e.stopPropagation(); });
 budsEl.addEventListener('click', e => {
-  const ribbon = e.target.closest('.term');
-  if (ribbon){ openCard(ribbon.dataset.card); return; }
   const bud = e.target.closest('.bud');
   if (!bud) return;
   if (bud.dataset.bud === 'deepen'){
@@ -5190,7 +5322,7 @@ budsEl.addEventListener('click', e => {
 });
 budsEl.addEventListener('keydown', e => {
   if (e.key === 'Enter' || e.key === ' '){
-    const t = e.target.closest('.bud,.term');
+    const t = e.target.closest('.bud');
     if (t){ e.preventDefault(); t.click(); }
   }
 });
