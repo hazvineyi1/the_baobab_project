@@ -626,6 +626,8 @@ body{
 /* Whose child a new brother or sister is: the answers are phrases rather than
    one or two words ("Sydney, by another mother"), so they stack instead of
    sharing a row. */
+.teachlbl{margin:8px 0 5px; font-size:10px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--muted);}
 .seg.col{flex-direction:column; gap:4px;}
 .seg.col button{flex:none; padding:8px 11px; text-align:left;}
 .row{display:flex; gap:7px;}
@@ -1691,6 +1693,22 @@ const possess = id => {
    by inferring, but by being taught. */
 const lexicon = () => state.lexicon || (state.lexicon = {});
 
+/* "Yes, that is the word." Recorded the same way a correction is, and for the
+   same reason: the next person to open this pair should see that somebody in
+   the family has already looked at it and agreed, rather than being asked
+   again as though nobody had.
+
+   It is stored with the term the app chose, so if the rule behind that term is
+   ever changed the affirmation still says which word the family agreed to. */
+function affirmTerm(shape, term, note){
+  if (!shape || !term) return;
+  snapshot();
+  const me = meId && state.people[meId];
+  lexicon()[shape] = { term: term.trim(), note: (note || '').trim(),
+                       affirmed: true,
+                       by: me ? me.name : '', at: new Date().toISOString().slice(0, 10) };
+}
+
 function teachTerm(shape, term, note){
   if (!shape || !term.trim()) return;
   snapshot();
@@ -1728,6 +1746,22 @@ function relationship(who, tid, byBloodOnly){
   return r;
 }
 
+/* THE SHAPE OF AN ANSWER: what this relationship IS, with the names taken out.
+
+   Every word this app produces is now filed under one of these, and that is
+   what makes a family able to correct it. A shape says "a woman looking at her
+   sister's son" — never "Hazvineyi looking at Victor" — so one correction
+   carries to every pair standing in the same place, which is the whole point:
+   a family is teaching the system, not annotating a row.
+
+   Sexes are in the key because the word turns on them, and the SEEN-BY sex is
+   in there too. That is not padding: a woman's sister's children are her
+   children and a man's are his vazukuru, so the same two people in the same
+   tree are two different words depending on who is asking. */
+const sexKey = x => x === 'f' ? 'woman' : x === 'm' ? 'man' : 'unknown';
+const shapeOf = (what, mine, theirs) =>
+  `blood:${what}:${sexKey(mine)}-looking:${sexKey(theirs)}`;
+
 function derive(who, tid, byBloodOnly){
   if (!who || !tid || !state.people[who] || !state.people[tid]) return null;
   if (who === tid) return { term:'You', why:'this is you' };
@@ -1737,7 +1771,9 @@ function derive(who, tid, byBloodOnly){
   // married to each other
   if (partnersOf(who).includes(tid)){
     return { term: them.sex === 'f' ? 'Mukadzi' : them.sex === 'm' ? 'Murume' : null,
-             why:'your husband or wife' };
+             why:'your husband or wife',
+             shape: shapeOf('spouse', me.sex, them.sex),
+             plain:'your husband or wife' };
   }
 
   const mine = ancestry(who), theirs = ancestry(tid);
@@ -1746,15 +1782,23 @@ function derive(who, tid, byBloodOnly){
   if (mine.up.has(tid)){
     const n = mine.up.get(tid);
     if (n === 1) return { term: them.sex === 'f' ? 'Amai' : them.sex === 'm' ? 'Baba' : null,
-                          why:'your mother or father' };
+                          why:'your mother or father',
+                          shape: shapeOf('parent', me.sex, them.sex),
+                          plain:'your mother or father' };
     return { term: them.sex === 'f' ? 'Ambuya' : them.sex === 'm' ? 'Sekuru' : null,
-             why:n === 2 ? 'your grandparent' : `your ancestor, ${n} generations back` };
+             why:n === 2 ? 'your grandparent' : `your ancestor, ${n} generations back`,
+             shape: shapeOf(`ancestor-${Math.min(n, 4)}`, me.sex, them.sex),
+             plain:n === 2 ? 'your grandparent' : `your ancestor ${n} generations back` };
   }
   if (theirs.up.has(who)){
     const n = theirs.up.get(who);
     if (n === 1) return { term: them.sex === 'f' ? 'Mwanasikana' : them.sex === 'm' ? 'Mwanakomana' : null,
-                          why:'your child' };
-    return { term:'Muzukuru', why:n === 2 ? 'your grandchild' : `your descendant, ${n} generations down` };
+                          why:'your child',
+                          shape: shapeOf('child', me.sex, them.sex),
+                          plain:'your child' };
+    return { term:'Muzukuru', why:n === 2 ? 'your grandchild' : `your descendant, ${n} generations down`,
+             shape: shapeOf(`descendant-${Math.min(n, 4)}`, me.sex, them.sex),
+             plain:n === 2 ? 'your grandchild' : `your descendant ${n} generations down` };
   }
 
   /* ── half brothers and sisters ─────────────────────────────────────────
@@ -1790,10 +1834,15 @@ function derive(who, tid, byBloodOnly){
       const needsAge = !t && me.sex && them.sex && me.sex === them.sex;
       // Same as the classificatory case: naming both candidates says the word
       // is one of two and that a birth year is all that is missing.
+      const shape = shapeOf(
+        `half-sibling-through-${p.sex === 'f' ? 'mother' : p.sex === 'm' ? 'father' : 'parent'}`,
+        me.sex, them.sex);
+      const plain = `your ${p.sex === 'f' ? 'mother' : p.sex === 'm' ? 'father' : 'parent'}'s ` +
+                    `child by another marriage`;
       return needsAge
-        ? { term:null, choice:"Mukoma or Munin'ina",
+        ? { term:null, choice:"Mukoma or Munin'ina", shape, plain,
             why:`${base} — add both birth years to say which` }
-        : { term:t, why:base };
+        : { term:t, why:base, shape, plain };
     }
   }
 
@@ -1819,42 +1868,94 @@ function derive(who, tid, byBloodOnly){
       // Tete's line and Sekuru's line, and the skew that runs down them
       const motherBrother = myLink.sex === 'f' && tgLink.sex === 'm';
       if (genDiff >= 2) return { term: them.sex === 'f' ? 'Ambuya' : 'Sekuru',
-                                 why:`${via} family, two generations above you` };
+                                 why:`${via} family, two generations above you`,
+                                 shape: shapeOf('crossed-line-two-above', me.sex, them.sex),
+                                 plain:'somebody two generations above you on the crossed side' };
       if (genDiff === 1) return motherBrother
-        ? { term:'Sekuru', why:`${via} brother` }
-        : { term:'Tete', why:`${via} sister` };
+        ? { term:'Sekuru', why:`${via} brother`,
+            shape: shapeOf('mothers-brother', me.sex, them.sex),
+            plain:"your mother's brother" }
+        : { term:'Tete', why:`${via} sister`,
+            shape: shapeOf('fathers-sister', me.sex, them.sex),
+            plain:"your father's sister" };
+      /* YOUR MOTHER'S BROTHER'S DAUGHTER is not handled here, deliberately —
+         overlaps() already owns that fact, and a rule written in two places is
+         a rule that will one day disagree with itself. His sons stay Sekuru,
+         which is what this line gives them. */
       return motherBrother
-        ? { term:'Sekuru', why:`descended from ${via} brother — that line stays Sekuru` }
-        : { term:'Muzukuru', why:`descended from ${via} sister — that line stays Muzukuru` };
+        ? { term:'Sekuru', why:`descended from ${via} brother — that line stays Sekuru`,
+            shape: shapeOf('mothers-brothers-line-below', me.sex, them.sex),
+            plain:"somebody down your mother's brother's line" }
+        : { term:'Muzukuru', why:`descended from ${via} sister — that line stays Muzukuru`,
+            shape: shapeOf('fathers-sisters-line-below', me.sex, them.sex),
+            plain:"somebody down your father's sister's line" };
     }
 
     // parallel: the line folds back into your own
     if (genDiff >= 2) return { term: them.sex === 'f' ? 'Ambuya' : them.sex === 'm' ? 'Sekuru' : null,
-                               why:'two generations above you' };
+                               why:'two generations above you',
+                               shape: shapeOf('same-line-two-above', me.sex, them.sex),
+                               plain:'somebody two generations above you on your own side' };
     if (genDiff === 1){
       if (them.sex === 'm') return { term: senior ? 'Babamukuru' : 'Babamunini',
-                                     why:`${via} ${senior ? 'older' : 'younger'} brother` };
+                                     why:`${via} ${senior ? 'older' : 'younger'} brother`,
+                                     shape: shapeOf(`parents-${senior ? 'older' : 'younger'}-brother`,
+                                                    me.sex, 'm'),
+                                     plain:`your parent's ${senior ? 'older' : 'younger'} brother` };
       if (them.sex === 'f') return { term: senior ? 'Amaiguru' : 'Amainini',
-                                     why:`${via} ${senior ? 'older' : 'younger'} sister` };
-      return { term:null, why:`${via} sibling` };
+                                     why:`${via} ${senior ? 'older' : 'younger'} sister`,
+                                     shape: shapeOf(`parents-${senior ? 'older' : 'younger'}-sister`,
+                                                    me.sex, 'f'),
+                                     plain:`your parent's ${senior ? 'older' : 'younger'} sister` };
+      return { term:null, why:`${via} sibling`,
+               shape: shapeOf('parents-sibling', me.sex, them.sex),
+               plain:"your parent's brother or sister" };
     }
     if (genDiff === 0){
       const sameParents = best.myUp === 0 && best.tgUp === 0;
       const older = olderThan(tid, who);
       const t = SIB(me.sex, them.sex, older);
       if (sameParents){
-        return { term:t, why:`your ${older ? 'older' : 'younger'} brother or sister` };
+        return { term:t, why:`your ${older ? 'older' : 'younger'} brother or sister`,
+                 shape: shapeOf(`sibling-${older ? 'older' : 'younger'}`, me.sex, them.sex),
+                 plain:`your ${older ? 'older' : 'younger'} brother or sister` };
       }
       const base = `${via} side — a brother or sister to you, not a cousin`;
       const needsAge = !t && me.sex && them.sex && me.sex === them.sex;
+      const cshape = shapeOf(`parents-siblings-child-${older ? 'older' : 'younger'}`,
+                             me.sex, them.sex);
+      const cplain = "your parent's brother's or sister's child";
       // Naming both candidates is more use than saying nothing: it shows the
       // word is one of two and that a birth year is all that's missing.
       return needsAge
-        ? { term:null, choice:"Mukoma or Munin'ina",
+        ? { term:null, choice:"Mukoma or Munin'ina", shape: cshape, plain: cplain,
             why:`${base} — add both birth years to say which` }
-        : { term:t, why:base };
+        : { term:t, why:base, shape: cshape, plain: cplain };
     }
-    return { term:'Muzukuru', why:`${via} side, ${-genDiff} generation${genDiff === -1 ? '' : 's'} below you` };
+    /* A WOMAN'S SISTER'S CHILDREN ARE HER CHILDREN, and a man's sister's
+       children are vazukuru. Told to this app by the family it is being built
+       for, and it is not a softening of "like a child" — the word is the word.
+
+       So the answer here turns on who is ASKING, which almost nothing else in
+       this file does: the same two people, the same tree, and the term changes
+       with the sex of the person looking. A man in the same position gets
+       Muzukuru, which is what the line below already gave everybody.
+
+       myUp === 0 is what makes it a SISTER rather than an aunt: the person
+       asking is themselves a child of the union both lines come from. */
+    if (genDiff === -1 && best.myUp === 0 && me.sex === 'f' && tgLink.sex === 'f'){
+      return { term: them.sex === 'f' ? 'Mwanasikana'
+             : them.sex === 'm' ? 'Mwanakomana' : null,
+               why:`your sister ${tgLink.name}'s child — and a woman's sister's ` +
+                   `children are her own`,
+               shape: shapeOf('sisters-child', 'f', them.sex),
+               plain:"your sister's child" };
+    }
+    return { term:'Muzukuru',
+             why:`${via} side, ${-genDiff} generation${genDiff === -1 ? '' : 's'} below you`,
+             shape: shapeOf(`same-line-${Math.min(-genDiff, 3)}-below`, me.sex, them.sex),
+             plain:`somebody ${-genDiff} generation${genDiff === -1 ? '' : 's'} below you ` +
+                   `on your own side` };
   }
 
   // no blood link — try the marriages, but only one hop, or two people
@@ -2007,11 +2108,21 @@ function overlaps(who, tid){
   }
 
   if (p && p.mothersBrother && p.genDiff === 0 && them.sex === 'f'){
-    // His sons stay Sekuru; his daughters do not.
+    /* His sons stay Sekuru; his daughters do not.
+
+       THE WORD HERE WAS CHANGED. It said Amai, on the reasoning that his
+       daughters are mothers to you. The family building this tree has since
+       said Mainini — "my brothers sons are sekuru to my children and his
+       daughters are mainini to my children" — and that is the word now.
+
+       The two are not far apart and the reasoning is the same in both: she is
+       a woman of your mother's house, standing in the mother role. Mainini is
+       the junior form of it, which is the distinction the family drew and this
+       app did not. */
     out.push({
       shape: 'overlap:mothers-brothers-daughter',
-      term: 'Amai', replaces: true,
-      why: "your mother's brother's daughter — his daughters are mothers to you"
+      term: 'Mainini', replaces: true,
+      why: "your mother's brother's daughter — a woman of your mother's house"
     });
   }
 
@@ -2047,13 +2158,22 @@ function kinTerms(who, tid){
     list.push({
       term: taught ? taught.term : term,
       why, shape: o.shape || null,
-      taught: !!taught,
-      // a word this app chose rather than was told; shown so it can be corrected
-      confirm: !!o.confirm && !taught
+      plain: o.plain || null,
+      taught: !!taught && !taught.affirmed,
+      // A family can say "yes, that is the word" as well as "no, we say this".
+      // An affirmation is not a correction and must not read as one — it is the
+      // family agreeing, which is worth as much and is worth showing as itself.
+      affirmed: !!(taught && taught.affirmed),
+      note: taught ? (taught.note || '') : '',
+      by: taught ? (taught.by || '') : '',
+      // A word this app chose rather than was told. Every derived term is one
+      // of these now, so every one of them can be put right.
+      confirm: !taught
     });
   };
   if (!over.some(o => o.replaces) && (base.term || base.choice)){
-    push(base.term || base.choice, base.why, { shape: base.shape });
+    push(base.term || base.choice, base.why,
+         { shape: base.shape, plain: base.plain, confirm: true });
   }
   for (const o of over) push(o.term, o.why, o);
   return { list, base, shape: base.shape || null, plain: base.plain || null };
@@ -3999,13 +4119,18 @@ function kinPicker(side, chosen){
     `<div class="kinlist" data-for="${side}"></div>`;
 }
 
-function kinVerdict(from, to){
+function kinVerdict(from, to, how){
+  how = how || {};
   if (!from || !to) return '';
   if (from === to) return `<p class="relline"><b>—</b><span>the same person</span></p>`;
   const k = kinTerms(from, to);
   if (!k) return '';
   const r = k.base;
-  const head = k.list.length
+  // Which question this card is answering, said in the panel's own words so
+  // the second one cannot be read as a second opinion about the first.
+  const banner = how.andBack
+    ? `<p class="lbl" style="margin-top:12px">And the other way round</p>` : '';
+  const head = banner + (k.list.length
     // One person is often several things at once. Showing only the first would
     // hide the shape of the system rather than explain it.
     ? `<div class="terms">` + k.list.map((t, i) =>
@@ -4013,8 +4138,10 @@ function kinVerdict(from, to){
           `<b>${esc(t.term)}${i === 0 && k.list.length > 1 ? '' : ''}</b>` +
           `<span>${i === 0 ? `${esc(kinName(to))} is ${esc(kinName(from))}'s ` : 'and also '}` +
           `${esc(t.term)} — ${esc(t.why)}` +
-          `${t.confirm ? ' <i>· this app chose the word; correct it if your family says otherwise</i>' : ''}` +
-          `${t.taught ? ' <i>· taught by your family</i>' : ''}</span>` +
+          `${t.affirmed ? ` <i>· agreed by your family${t.by ? ', ' + esc(t.by) : ''}` +
+                          `${t.note ? ' — ' + esc(t.note) : ''}</i>` : ''}` +
+          `${t.taught ? ` <i>· your family's word${t.by ? ', from ' + esc(t.by) : ''}` +
+                        `${t.note ? ' — ' + esc(t.note) : ''}</i>` : ''}</span>` +
         `</p>`).join('') +
       (k.list.length > 1
         ? `<p class="overlapnote">${esc(kinName(to))} is ${k.list.length} things to ` +
@@ -4022,7 +4149,7 @@ function kinVerdict(from, to){
           `whether ${esc(kinName(from))} is a man or a woman.</p>` : '') +
       `</div>`
     : `<p class="relline none"><b>Not named</b><span>${esc(kinName(to))} is ` +
-      `${esc(kinName(from))}'s relative — ${esc(r.why)}</span></p>`;
+      `${esc(kinName(from))}'s relative — ${esc(r.why)}</span></p>`);
 
   // Where the app has a shape but no word for it, ask. This is the whole
   // mechanism: it never guesses, and it never stays ignorant either.
@@ -4034,22 +4161,45 @@ function kinVerdict(from, to){
         `this way will carry it from then on.</p>` +
         `<div class="row">` +
           `<input class="fld teachterm" placeholder="The word your family uses" autocomplete="off">` +
-          `<button type="button" class="btn teachgo">Name it</button>` +
         `</div>` +
+        `<input class="fld teachwhy" placeholder="Why — the rule behind it, in your own words" autocomplete="off">` +
+        `<div class="row"><button type="button" class="btn teachgo">Name it</button></div>` +
       `</div>`;
   }
-  // Anything this app chose for itself, or was taught, can be corrected here.
-  const editable = k.list.filter(t => t.shape && (t.confirm || t.taught));
+  /* AFFIRM OR PUT RIGHT — and this is where the system gets taught.
+
+     Every word above is this app's reading of a rule. A family that agrees
+     should be able to say so, and a family that does not should be able to
+     replace it AND say why — because the explanation is the part worth
+     keeping. A bare override teaches nobody; "we call her Mainini, she is of
+     my mother's house" is the rule itself, written down by the people who
+     hold it.
+
+     Filed under the shape, so it carries to every pair standing in the same
+     place rather than to these two names. */
+  const editable = k.list.filter(t => t.shape);
   if (editable.length){
     return head + editable.map(t =>
-      `<div class="teach" data-shape="${esc(t.shape)}">` +
-        `<p>${t.taught ? `Your family calls this <b>${esc(t.term)}</b>.`
-                       : `This app used <b>${esc(t.term)}</b> here. If your family says ` +
-                         `otherwise, the word you give is the one it will use.`}</p>` +
+      `<div class="teach" data-shape="${esc(t.shape)}" data-term="${esc(t.term)}">` +
+        `<p>${t.taught
+              ? `Your family calls this <b>${esc(t.term)}</b>.`
+              : t.affirmed
+              ? `Your family has agreed that <b>${esc(t.term)}</b> is the word here.`
+              : `This app read <b>${esc(t.term)}</b> from ` +
+                `<b>${esc(t.plain || 'this')}</b>. Is that what your family says?`}</p>` +
+        (t.taught || t.affirmed ? '' :
+          `<div class="row"><button type="button" class="btn affirmgo">` +
+            `Yes, that is the word</button></div>`) +
+        `<p class="teachlbl">${t.taught || t.affirmed
+              ? 'Change it' : 'Or tell it the word your family uses'}</p>` +
         `<div class="row">` +
           `<input class="fld teachterm" placeholder="The word your family uses" autocomplete="off">` +
-          `<button type="button" class="btn teachgo">${t.taught ? 'Change' : 'Correct'}</button>` +
-          (t.taught ? `<button type="button" class="btn ghost" data-forget="${esc(t.shape)}">Reset</button>` : '') +
+        `</div>` +
+        `<input class="fld teachwhy" placeholder="Why — the rule behind it, in your own words" autocomplete="off">` +
+        `<div class="row">` +
+          `<button type="button" class="btn teachgo">${t.taught || t.affirmed ? 'Change it' : 'Correct it'}</button>` +
+          (t.taught || t.affirmed
+            ? `<button type="button" class="btn ghost" data-forget="${esc(t.shape)}">Reset</button>` : '') +
         `</div>` +
       `</div>`).join('');
   }
@@ -4059,6 +4209,39 @@ function kinVerdict(from, to){
 // A plain-language rendering of a shape, for the list of what has been taught.
 function shapeLabel(shape){
   const p = String(shape).split(':');
+
+  /* A blood shape reads back as the relationship it stands for, so the list of
+     words a family has taught says what each one is FOR. Without this it would
+     say "blood:sisters-child:woman-looking:man", which is a key, not a
+     sentence — and this list is the family's own record of what they told it. */
+  if (p[0] === 'blood'){
+    const what = (p[1] || '').replace(/-/g, ' ')
+      .replace(/^ancestor (\d)$/, 'ancestor, $1 generations up')
+      .replace(/^descendant (\d)$/, 'descendant, $1 generations down')
+      .replace(/^same line (\d) below$/, 'own side, $1 generations below')
+      .replace(/^sibling (older|younger)$/, '$1 brother or sister')
+      .replace(/^parents (older|younger) (brother|sister)$/, "parent's $1 $2")
+      .replace(/^parents siblings child (older|younger)$/,
+               "parent's brother's or sister's child, $1")
+      .replace(/^half sibling through (\w+)$/, "$1's child by another marriage")
+      // The keys are written without apostrophes because they are keys; the
+      // sentence needs them back.
+      .replace(/^sisters child$/, "sister's child")
+      .replace(/^mothers brothers child$/, "mother's brother's child")
+      .replace(/^mothers brother$/, "mother's brother")
+      .replace(/^fathers sister$/, "father's sister")
+      .replace(/^mothers brothers line below$/, "mother's brother's line, below you")
+      .replace(/^fathers sisters line below$/, "father's sister's line, below you")
+      .replace(/^parents sibling$/, "parent's brother or sister")
+      .replace(/^crossed line two above$/, 'crossed side, two generations up')
+      .replace(/^same line two above$/, 'own side, two generations up');
+    const looking = (p[2] || '').replace('-looking', '');
+    const them = p[3] || '';
+    const asA = looking === 'unknown' ? '' : ` — as a ${looking} sees them`;
+    const ofSex = them === 'unknown' ? '' : ` (${them})`;
+    return `your ${what}${ofSex}${asA}`;
+  }
+
   if (p[0] !== 'inlaw') return shape;
   if (p[1] === 'married-to-my') return `the ${p[3] === 'woman' ? 'wife' : p[3] === 'man' ? 'husband' : 'spouse'} of your ${p[2]}`;
   const who = p[1].replace('through-my-', '');
@@ -4089,9 +4272,19 @@ function openKinship(){
       `<div>${kinPicker('b', kinB)}</div>` +
     `</div>` +
     (kinA && kinB
-      // Both ways round, because the terms are not reciprocal: your mother's
-      // brother is Sekuru to you, and you are Muzukuru to him.
-      ? kinVerdict(kinA, kinB) + kinVerdict(kinB, kinA)
+      /* THE DIRECTION THE PICKERS ASK FOR, FIRST.
+
+         Both ways round are shown, because Shona terms are not reciprocal and
+         hiding one would hide half the system. But the pickers above say
+         "PERSON" and "SEEN BY", and that is a question with one answer — so
+         that answer comes first and the other is labelled as the way back.
+
+         It used to be the other way round, which put a Muzukuru card at the
+         top of a panel whose own labels were asking what Agnes is to
+         Hazvineyi. Both cards were right; the first one was answering a
+         different question. */
+      ? kinVerdict(kinB, kinA, { asked: true }) +
+        kinVerdict(kinA, kinB, { andBack: true })
       : `<p class="warn">Pick two people. Shona terms are not reciprocal, so ` +
         `both directions are shown — your mother's brother is <b>Sekuru</b> to ` +
         `you, and you are <b>Muzukuru</b> to him.</p>`) +
@@ -4160,14 +4353,22 @@ function openKinship(){
   el.querySelectorAll('[data-ask]').forEach(b => b.onclick = () => openCard(b.dataset.ask));
   el.querySelectorAll('.teach').forEach(box => {
     const input = box.querySelector('.teachterm');
+    const why = box.querySelector('.teachwhy');
     const commit = () => {
       if (!input.value.trim()) { input.focus(); return; }
-      teachTerm(box.dataset.shape, input.value);
+      teachTerm(box.dataset.shape, input.value, why ? why.value : '');
       render(); save();
       say(`${input.value.trim()} recorded. Every pair related this way now carries it.`);
       openKinship();
     };
     box.querySelector('.teachgo').onclick = commit;
+    const yes = box.querySelector('.affirmgo');
+    if (yes) yes.onclick = () => {
+      affirmTerm(box.dataset.shape, box.dataset.term, why ? why.value : '');
+      render(); save();
+      say(`${box.dataset.term} agreed. It will not be asked about again.`);
+      openKinship();
+    };
     input.addEventListener('keydown', e => { if (e.key === 'Enter'){ e.preventDefault(); commit(); } });
   });
   el.querySelectorAll('[data-forget]').forEach(b => b.onclick = () => {

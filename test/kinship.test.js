@@ -63,9 +63,18 @@ const terms = (from, to) => {
   eq('and Sekuru to a woman', terms(f.woman, f.mbro), ['Sekuru']);
   eq('his son is Sekuru too, to a man', terms(f.man, f.mbs), ['Sekuru']);
   eq('and to a woman', terms(f.woman, f.mbs), ['Sekuru']);
-  eq('his DAUGHTER is not — she is a mother to you, to a man',
-     terms(f.man, f.mbd), ['Amai']);
-  eq('and to a woman', terms(f.woman, f.mbd), ['Amai']);
+  /* CHANGED ON THE FAMILY'S INSTRUCTION, and recorded here rather than quietly
+     edited, because the previous word was not wrong by accident — it was what
+     this app had been told before.
+
+     It said Amai: his daughters are mothers to you. The family building this
+     tree has since said, in these words, "my brothers sons are sekuru to my
+     children and his daughters are mainini to my children". Same house, same
+     reasoning, junior form — which is the distinction they drew and the app
+     had flattened. */
+  eq('his DAUGHTER is not — she is Mainini, a woman of your mother\'s house, to a man',
+     terms(f.man, f.mbd), ['Mainini']);
+  eq('and to a woman', terms(f.woman, f.mbd), ['Mainini']);
 
   section("your mother's brother's wife");
   eq('to a man she is Ambuya, and also a wife', terms(f.man, f.mbw), ['Ambuya', 'Mukadzi']);
